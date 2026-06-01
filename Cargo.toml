@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/flux-core",
+    "crates/flux-sys",
+    "crates/flux",
+    "crates/flux-gui",
+    "crates/flux-cli",
+]

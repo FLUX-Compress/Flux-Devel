@@ -1,0 +1,33 @@
+FLUX Commercial License Agreement
+Version 1.0, May 2026
+
+Copyright (C) 2026 FLUX Authors & Contributors. All rights reserved.
+
+This Commercial License Agreement (the "Agreement") is a legal agreement between you (either an individual or a single entity, "Licensee") and the FLUX Authors/Entity ("Licensor") for the FLUX compression library, including all associated source code, binaries, and documentation (the "Software").
+
+By integrating, copying, modifying, distributing, or otherwise using the Software in a commercial or proprietary product, you agree to be bound by the terms of this Agreement. If you do not agree to the terms of this Agreement, you must use the Software solely under the terms of the GNU General Public License version 3 (GPL v3).
+
+1. Grant of License
+Subject to the terms and conditions of this Agreement and payment of the applicable commercial license fee, Licensor grants Licensee a worldwide, non-exclusive, non-transferable, perpetual license to:
+a) Integrate the Software into Licensee's proprietary software products ("Licensee Products").
+b) Modify, compile, and build the Software as part of the Licensee Products.
+c) Distribute the Software in binary form only, as an embedded component of the Licensee Products, to end-users without disclosing the source code of the Licensee Products.
+
+2. Restrictions
+Except as expressly authorized in Section 1, Licensee shall not:
+a) Sell, rent, lease, sub-license, or redistribute the Software as a standalone SDK, library, or development tool.
+b) Use the Licensor's trademarks, service marks, or logos without prior written consent.
+c) Remove or modify any copyright notices, trademark legends, or author attributions contained within the Software source code.
+
+3. Dual-Licensing Model
+The Software is dual-licensed under the GNU General Public License version 3 (GPL v3) and this Commercial License. If Licensee's use or redistribution of the Software does not comply with the GPL v3 (e.g., Licensee wishes to keep the Licensee Product's source code proprietary), Licensee must obtain this Commercial License from Licensor.
+
+4. Warranty Disclaimer
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+5. Support and Maintenance
+This License does not entitle Licensee to any technical support, maintenance, or updates for the Software. Separate commercial support packages may be purchased from Licensor.
+
+For commercial licensing inquiries, pricing, support packages, or custom terms, please contact:
+Email: licensing@flux-compress.org
+Website: https://flux-compress.org

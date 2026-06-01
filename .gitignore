@@ -1,0 +1,52 @@
+# Rust build output
+/target/
+**/target/
+
+# FLUX archive files (generated output)
+*.flx
+
+# Large binary/audio test data
+*.bin
+*.wav
+*.rar
+
+# Windows executable artifacts
+Testthing.exe
+*.exe
+
+# Temporary test text files
+test_*.txt
+
+# Test data and output directories
+/data/
+/out/
+/out_extracted/
+/extracted_test/
+/scratch/comparison_extracted/
+/scratch/comparison_out/
+/scratch/extracted/
+/scratch/extracted_test/
+/scratch/ext_*/
+/scratch/extracted_*/
+/scratch/real_world_corpus_extracted/
+/scratch/test_decompressed/
+/scratch/verify_dir/
+/scratch/verify_dir_decompressed/
+/scratch/encrypted_extracted_fail/
+/scratch/encrypted_extracted_ok/
+
+# Scratch comparison/benchmark outputs (not source)
+scratch/out/
+scratch/real_world_corpus/
+scratch/real_world_corpus.flx
+*.7z
+*.gz
+*.zst
+*.zip
+
+# OS / editor artifacts
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.qodo/

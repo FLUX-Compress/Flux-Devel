@@ -1,0 +1,11 @@
+[package]
+name = "flux-cli"
+version = "0.1.0"
+edition = "2021"
+authors = ["FLUX Contributors"]
+description = "Command Line Interface for FLUX"
+license = "GPL-3.0-only OR Commercial"
+
+[dependencies]
+flux = { path = "../flux" }
+clap = { version = "3.2.25", features = ["derive"] }
