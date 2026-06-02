@@ -10,8 +10,61 @@ import pyzstd
 
 # Paths to executables
 CLI_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)), "target", "release", "flux-cli.exe")
-RAR_PATH = "C:\\Program Files\\WinRAR\\Rar.exe"
-ZIP7_PATH = "C:\\Program Files\\NVIDIA Corporation\\NVIDIA app\\7z.exe"
+
+def verify_tool(path):
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        is_winrar_gui = "winrar.exe" in os.path.basename(path).lower()
+        if is_winrar_gui:
+            try:
+                subprocess.run([path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=0.5)
+                return True
+            except subprocess.TimeoutExpired:
+                return True
+            except Exception:
+                return False
+        else:
+            subprocess.run([path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=2.0)
+            return True
+    except Exception:
+        return False
+
+def find_rar():
+    candidates = [
+        "C:\\Program Files\\WinRAR\\Rar.exe",
+        "C:\\Program Files\\WinRAR\\WinRAR.exe",
+        "C:\\Program Files (x86)\\WinRAR\\Rar.exe",
+        "C:\\Program Files (x86)\\WinRAR\\WinRAR.exe",
+    ]
+    for p in candidates:
+        if verify_tool(p):
+            return p
+    for name in ["rar", "winrar"]:
+        p = shutil.which(name)
+        if verify_tool(p):
+            return p
+    return None
+
+def find_7z():
+    candidates = [
+        "C:\\Program Files\\7-Zip\\7z.exe",
+        "C:\\Program Files (x86)\\7-Zip\\7z.exe",
+    ]
+    for p in candidates:
+        if verify_tool(p):
+            return p
+    p = shutil.which("7z")
+    if p and verify_tool(p):
+        return p
+    return None
+
+RAR_PATH = find_rar()
+ZIP7_PATH = find_7z()
+
+print(f"Tool Detection:")
+print(f"  RAR_PATH: {RAR_PATH}")
+print(f"  ZIP7_PATH: {ZIP7_PATH}")
 
 def sha256_file(filepath):
     h = hashlib.sha256()
@@ -77,6 +130,8 @@ def run_flux_decompress(archive_path, extract_path):
     return elapsed, proc.returncode, proc.stderr.decode('utf-8', errors='ignore')
 
 def run_rar(input_path, archive_path):
+    if not RAR_PATH:
+        return 0.0, 1
     # RAR switch: a (add), -m5 (best compression), -ep1 (exclude base folder)
     cmd = [RAR_PATH, "a", "-m5", "-ep1", archive_path, input_path]
     start = time.perf_counter()
@@ -85,6 +140,8 @@ def run_rar(input_path, archive_path):
     return elapsed, proc.returncode
 
 def run_7z_lzma(input_path, archive_path):
+    if not ZIP7_PATH:
+        return 0.0, 1
     # 7z switches: a (add), -mx=9 (best compression, uses LZMA/LZMA2 on 7z by default)
     cmd = [ZIP7_PATH, "a", "-mx=9", archive_path, input_path]
     start = time.perf_counter()
@@ -93,6 +150,8 @@ def run_7z_lzma(input_path, archive_path):
     return elapsed, proc.returncode
 
 def run_7z_ppmd(input_path, archive_path):
+    if not ZIP7_PATH:
+        return 0.0, 1
     # 7z switches: a (add), -m0=PPMd -mx=9 (use PPMd at level 9)
     cmd = [ZIP7_PATH, "a", "-m0=PPMd", "-mx=9", archive_path, input_path]
     start = time.perf_counter()
@@ -176,6 +235,7 @@ def main():
         {"name": "sensor_log.bin", "path": os.path.join(root_dir, "data", "sensor_log.bin"), "is_dir": False},
         {"name": "float32_timeseries.bin", "path": os.path.join(root_dir, "data", "float32_timeseries.bin"), "is_dir": False},
         {"name": "real_audio.wav", "path": os.path.join(root_dir, "data", "real_audio.wav"), "is_dir": False},
+        {"name": "real_scientific.bin", "path": os.path.join(root_dir, "data", "real_scientific.bin"), "is_dir": False},
     ]
 
     out_dir = os.path.join(scratch_dir, 'comparison_out')
@@ -216,12 +276,12 @@ def main():
                 tar.add(path, arcname=name)
 
         tools_run = [
+            ("FLUX Balanced", "flux_balanced"),
             ("FLUX Maximum", "flux_max"),
-            ("FLUX Extreme", "flux_extreme"),
             ("gzip -9", "gzip"),
             ("zstd -19", "zstd"),
             ("RAR -m5", "rar"),
-            ("7-Zip LZMA -mx9", "lzma"),
+            ("7-Zip LZMA -mx=9", "lzma"),
             ("7-Zip PPMd", "ppmd")
         ]
 
@@ -229,8 +289,8 @@ def main():
 
         for label, tool_id in tools_run:
             archive_exts = {
+                "flux_balanced": ".flux_bal.flx",
                 "flux_max": ".flux_max.flx",
-                "flux_extreme": ".flux_ext.flx",
                 "gzip": ".gz" if not is_dir else ".tar.gz",
                 "zstd": ".zst" if not is_dir else ".tar.zst",
                 "rar": ".rar",
@@ -246,7 +306,27 @@ def main():
             roundtrip_ok = "N/A"
             code = 0
 
-            if tool_id == "flux_max":
+            if tool_id == "flux_balanced":
+                elapsed, code, err = run_flux_compress(path, archive_path, "balanced")
+                if code == 0:
+                    ext_path = os.path.join(extracted_dir, f"flux_bal_{name}")
+                    os.makedirs(ext_path, exist_ok=True)
+                    _, d_code, d_err = run_flux_decompress(archive_path, ext_path)
+                    if d_code == 0:
+                        if is_dir:
+                            ok, _ = verify_extracted_dir(orig_hashes, ext_path)
+                            roundtrip_ok = "Yes" if ok else "FAILED"
+                        else:
+                            extracted_file = os.path.join(ext_path, os.path.basename(path))
+                            roundtrip_ok = "Yes" if os.path.exists(extracted_file) and sha256_file(extracted_file) == orig_hash else "FAILED"
+                    else:
+                        print(f"  flux_balanced decompression failed: {d_err}")
+                        roundtrip_ok = "FAILED"
+                else:
+                    print(f"  flux_balanced compression failed: {err}")
+                    code = 1
+
+            elif tool_id == "flux_max":
                 elapsed, code, err = run_flux_compress(path, archive_path, "max")
                 if code == 0:
                     ext_path = os.path.join(extracted_dir, f"flux_max_{name}")
@@ -264,26 +344,6 @@ def main():
                         roundtrip_ok = "FAILED"
                 else:
                     print(f"  flux_max compression failed: {err}")
-                    code = 1
-
-            elif tool_id == "flux_extreme":
-                elapsed, code, err = run_flux_compress(path, archive_path, "extreme")
-                if code == 0:
-                    ext_path = os.path.join(extracted_dir, f"flux_extreme_{name}")
-                    os.makedirs(ext_path, exist_ok=True)
-                    _, d_code, d_err = run_flux_decompress(archive_path, ext_path)
-                    if d_code == 0:
-                        if is_dir:
-                            ok, _ = verify_extracted_dir(orig_hashes, ext_path)
-                            roundtrip_ok = "Yes" if ok else "FAILED"
-                        else:
-                            extracted_file = os.path.join(ext_path, os.path.basename(path))
-                            roundtrip_ok = "Yes" if os.path.exists(extracted_file) and sha256_file(extracted_file) == orig_hash else "FAILED"
-                    else:
-                        print(f"  flux_extreme decompression failed: {d_err}")
-                        roundtrip_ok = "FAILED"
-                else:
-                    print(f"  flux_extreme compression failed: {err}")
                     code = 1
 
             elif tool_id == "gzip":
@@ -318,16 +378,28 @@ def main():
                 roundtrip_ok = "Yes"
 
             elif tool_id == "rar":
-                elapsed, code = run_rar(path, archive_path)
-                roundtrip_ok = "Yes" if code == 0 else "FAILED"
+                if not RAR_PATH:
+                    code = 1
+                    roundtrip_ok = "N/A"
+                else:
+                    elapsed, code = run_rar(path, archive_path)
+                    roundtrip_ok = "Yes" if code == 0 else "FAILED"
 
             elif tool_id == "lzma":
-                elapsed, code = run_7z_lzma(path, archive_path)
-                roundtrip_ok = "Yes" if code == 0 else "FAILED"
+                if not ZIP7_PATH:
+                    code = 1
+                    roundtrip_ok = "N/A"
+                else:
+                    elapsed, code = run_7z_lzma(path, archive_path)
+                    roundtrip_ok = "Yes" if code == 0 else "FAILED"
 
             elif tool_id == "ppmd":
-                elapsed, code = run_7z_ppmd(path, archive_path)
-                roundtrip_ok = "Yes" if code == 0 else "FAILED"
+                if not ZIP7_PATH:
+                    code = 1
+                    roundtrip_ok = "N/A"
+                else:
+                    elapsed, code = run_7z_ppmd(path, archive_path)
+                    roundtrip_ok = "Yes" if code == 0 else "FAILED"
 
             if code == 0 and os.path.exists(archive_path):
                 comp_size = os.path.getsize(archive_path)
@@ -340,12 +412,13 @@ def main():
                     "roundtrip": roundtrip_ok
                 })
             else:
-                print(f"  {label:<20} FAILED or NOT AVAILABLE")
+                status = "NOT AVAILABLE" if roundtrip_ok == "N/A" else "FAILED"
+                print(f"  {label:<20} {status}")
                 ds_results.append({
                     "tool": label,
                     "ratio": 0.0,
                     "time": 0.0,
-                    "roundtrip": "FAILED"
+                    "roundtrip": roundtrip_ok
                 })
 
         # Cleanup temp tar

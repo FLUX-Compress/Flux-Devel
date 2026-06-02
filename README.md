@@ -17,37 +17,49 @@ Numbers are from a fresh run of the included benchmark scripts on this machine.
 All FLUX runs use **Balanced mode** (32 MB window). Roundtrip integrity verified
 by SHA-256 on every result.
 
-### Structured & Numeric Data (15 MB files, benchmark.py)
+### Structured & Numeric Data (15 MB files, benchmark.py / benchmark_rar_7z.py)
 
-| Dataset | FLUX Balanced | gzip -9 | zstd -19 | FLUX vs zstd |
-| :--- | :---: | :---: | :---: | :---: |
-| coordinates_xyz.bin (3×f32 XYZ) | **51.70x** | 2.83x | 4.30x | **+12.03x** |
-| float64_scientific.bin (f64 series) | **23.08x** | 2.93x | 3.97x | **+5.81x** |
-| float32_timeseries.bin (f32 series) | **4.60x** | 2.70x | 3.66x | **+0.94x** |
-| sensor_log.bin (3-channel f32 telemetry) | **4.46x** | 1.74x | 3.29x | **+1.17x** |
-| real_audio.wav (synthesized music, PCM16) | **1.88x** | 1.21x | 1.45x | **+0.43x** |
-| real_scientific.bin (heat-diffusion f64) | **1.68x** | 1.43x | 1.50x | **+0.18x** |
+| Dataset | FLUX Balanced | FLUX Maximum | gzip -9 | zstd -19 | RAR -m5 | 7-Zip LZMA | 7-Zip PPMd |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| coordinates_xyz.bin (3×f32 XYZ) | 51.70x | 56.54x | 2.83x | 4.30x | **64.33x** | 5.81x | 1.80x |
+| float64_scientific.bin (f64 series) | 23.08x | **23.61x** | 2.93x | 3.97x | 23.08x | 4.34x | 2.11x |
+| sensor_log.bin (3-channel f32 telemetry) | 4.46x | **4.49x** | 1.74x | 3.29x | 4.01x | 3.86x | 1.56x |
+| float32_timeseries.bin (f32 series) | 4.60x | **4.62x** | 2.70x | 3.67x | 4.08x | 4.28x | 3.19x |
+| real_audio.wav (synthesized PCM: chord synthesis + drums) | **1.88x** | **1.88x** | 1.21x | 1.45x | 1.84x | 1.71x | 1.78x |
+| real_scientific.bin (heat-diffusion f64 simulation) | 1.68x | 1.68x | 1.43x | 1.50x | 1.69x | **1.75x** | 1.47x |
 
 ### Real-World Mixed Corpus (12.1 MB: Rust source + docs + logs + binary, benchmark_levels.py)
 
-| Level | Window | Ratio | Time | Peak RAM | vs tar.gz -9 | vs tar.zst -19 |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| Tiny | 256 KB | 8.59x | 0.31s | 46 MB | — | — |
-| Fast | 4 MB | 8.22x | 0.18s | 78 MB | — | — |
-| **Balanced** | **32 MB** | **9.00x** | **3.26s** | **223 MB** | — | — |
-| Maximum | 128 MB | 14.00x | 43.5s | 632 MB | — | — |
-| Extreme | 256 MB | 14.00x | 85.6s | 1,152 MB | — | — |
-| tar.gz -9 | 32 KB | 8.74x | 0.28s | — | baseline | — |
-| tar.zst -19 | — | 13.00x | 4.38s | — | — | baseline |
+**FLUX compression levels:**
 
-Tiny beats gzip on this corpus (8.59x vs 8.74x is within noise). Maximum and Extreme
-match zstd -19 (13.00x) and can exceed it on data with long-range structure.
+| Level | Window | Ratio | Time | Peak RAM |
+| :--- | :---: | :---: | :---: | :---: |
+| Tiny | 256 KB | 8.59x | 0.31s | 46 MB |
+| Fast | 4 MB | 8.22x | 0.18s | 78 MB |
+| **Balanced** | **32 MB** | **9.00x** | **3.26s** | **223 MB** |
+| Maximum | 128 MB | 14.00x | 43.5s | 632 MB |
+| Extreme | 256 MB | 14.00x | 85.6s | 1,152 MB |
+
+**Same corpus — external tool comparison** (benchmark_rar_7z.py, `Rar.exe -m5`, `7z -mx=9`):
+
+| Tool | Ratio |
+| :--- | :---: |
+| tar.gz -9 | 8.74x |
+| RAR -m5 | 10.43x |
+| 7-Zip PPMd -mx=9 | 12.74x |
+| tar.zst -19 | 13.00x |
+| **FLUX Maximum / Extreme** | **14.00x** |
+| 7-Zip LZMA -mx=9 | 14.61x |
+
+FLUX Tiny (8.59x) and Balanced (9.00x) beat tar.gz on this corpus. Maximum and
+Extreme (14.00x) beat zstd -19 (13.00x), 7-Zip PPMd (12.74x), and RAR (10.43x).
+7-Zip LZMA -mx=9 edges ahead at 14.61x on this corpus — an honest result.
 
 **Honest note on prose**: FLUX is competitive with gzip on pure text (not dominant).
 The structured-data wins shown above are the headline case. For pure-prose archives,
-zstd -19 typically leads at high-compression settings.
+zstd -19 and 7-Zip PPMd typically lead at high-compression settings.
 
-To reproduce: `python benchmark.py` and `python benchmark_levels.py` (requires a
+To reproduce: `python benchmark.py`, `python benchmark_levels.py`, and `python benchmark_rar_7z.py` (requires a
 release build — see Building below).
 
 ---
@@ -143,22 +155,19 @@ cargo run --release --bin flux-gui
 ### Rust Crate
 
 ```rust
-use flux_core::{FluxCompressor, FluxOptions, FluxCompressionLevel};
-use std::path::Path;
+use flux::{Archive, Compression};
 
-let options = FluxOptions {
-    level: FluxCompressionLevel::Balanced,
-    ..Default::default()
-};
-let mut compressor = FluxCompressor::new(options);
-compressor.compress_directory(Path::new("./data"), Path::new("out.flx"))?;
+let stats = Archive::compress("./data")
+    .output("out.flx")
+    .level(Compression::Balanced)
+    .run()?;
 ```
 
 ### C SDK
 
 ```bash
-cargo build --release -p flux-sys
-# Produces flux_sys.dll (Windows) or libflux_sys.so (Linux)
+cargo build --release -p flux-core
+# Produces flux_core_v1.dll (Windows) or libflux_core_v1.so (Linux)
 ```
 
 ---
@@ -187,10 +196,14 @@ python benchmark.py
 
 # Per-level ratios on a real-world corpus vs tar.gz / tar.zst
 python benchmark_levels.py
+
+# Full structured-data benchmark including RAR and 7-Zip
+python benchmark_rar_7z.py
 ```
 
 `benchmark.py` auto-generates the test datasets if not present. `benchmark_levels.py`
-compresses the repo source itself.
+compresses the repo source itself. `benchmark_rar_7z.py` runs a full comparative
+benchmark against system installations of WinRAR and 7-Zip.
 
 ---
 
