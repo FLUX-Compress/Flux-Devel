@@ -1,11 +1,16 @@
 # FLUX Format and Algorithm Specification
-**Version 1.1 — June 2026**
+**Version 1.2 — June 2026**
 
 This document describes the archive file format, compression pipeline, and stream
 specifications of the FLUX compression engine. It is intended to be accurate enough
 for an independent developer to build a compatible decoder. All byte offsets and
 field layouts were derived directly from the serialization/deserialization code in
 `crates/flux-core/src/`.
+
+> **Version 1.2 note:** This release adds an optimal parser (binary-tree match
+> finding + cost-based parsing) at the Maximum/Extreme levels (§5.6.1). This is an
+> **encoder-only** change — the on-disk format is **unchanged from 1.1**, and
+> archives produced by 1.1 and 1.2 are mutually compatible.
 
 ---
 
@@ -35,7 +40,8 @@ By analyzing the structure of these streams dynamically:
 ## 2. Compression Levels
 
 FLUX provides five preset compression levels. The level controls the sliding-window
-size (and therefore block size and memory usage) as well as the LZ77 search depth.
+size (and therefore block size and memory usage), the match-finding strategy, and
+the parser.
 
 Source: `crates/flux-core/src/ffi.rs` — `FluxCompressionLevel` enum and
 `window_size_for_level()`.
@@ -44,9 +50,15 @@ Source: `crates/flux-core/src/ffi.rs` — `FluxCompressionLevel` enum and
 | :--- | :---: | :---: | :--- |
 | **Tiny** | 0 | 256 KB (262,144 bytes) | Minimal memory footprint; for constrained decompression targets. |
 | **Fast** | 1 | 4 MB (4,194,304 bytes) | Greedy matching, highest throughput, lower ratio. |
-| **Balanced** | 2 | 32 MB (33,554,432 bytes) | Default. Good balance of speed and ratio. |
-| **Maximum** | 3 | 128 MB (134,217,728 bytes) | Adaptive dual-path evaluation per block; highest ratio. |
-| **Extreme** | 4 | 256 MB (268,435,456 bytes) | Maximum window; diminishing returns vs. Maximum on most data. |
+| **Balanced** | 2 | 32 MB (33,554,432 bytes) | Default. Hash-chain lazy matching. Good balance of speed and ratio. |
+| **Maximum** | 3 | 128 MB (134,217,728 bytes) | Binary-tree match finder + cost-based optimal parser (best ratio; slow to compress). |
+| **Extreme** | 4 | 256 MB (268,435,456 bytes) | As Maximum, with the largest window. Slowest compression. |
+
+Levels Tiny/Fast/Balanced use a hash-chain match finder with greedy/lazy parsing
+(fast). Levels Maximum/Extreme use a binary-tree match finder with a cost-based
+optimal parser (§5.6.1) — substantially slower to compress but achieving the best
+ratios. **Decompression speed is identical across all levels**; the parser choice is
+an encode-time concern only.
 
 The `window_size` stored in the plaintext bootstrap header is the **decoder's source
 of truth** for memory allocation. The decoder reads and allocates the window before
@@ -170,7 +182,7 @@ Source: `crates/flux-core/src/lib.rs` — block header write/read at offsets 0..
 | 5–12 | Compressed Size | 8 | `u64` LE | Compressed payload size in bytes |
 | 13–20 | Uncompressed Size | 8 | `u64` LE | Uncompressed payload size in bytes |
 | 21–52 | Compressed Hash | 32 | `[u8; 32]` | SHA-256 of the compressed payload |
-| 53–65 | TransformStack | 13 | Binary | Default (zeroed) transform stack (see §5.7) |
+| 53–65 | TransformStack | 13 | Binary | Default (zeroed) transform stack (see §5.8) |
 
 The block payload is the concatenation of **sub-blocks** (§3.5). If
 `is_encrypted` is 1, the payload is AES-256-GCM encrypted as a single chunk with
@@ -190,10 +202,10 @@ Source: `crates/flux-core/src/lib.rs` — sub-block header read at `sub_pos`.
 | :--- | :--- | :---: | :---: | :--- |
 | 0–3 | Uncompressed Size | 4 | `u32` LE | Original uncompressed size of this sub-block |
 | 4–7 | Compressed Size | 4 | `u32` LE | Compressed size of this sub-block (bytes that follow) |
-| 8–20 | TransformStack | 13 | Binary | Serialized transform decisions (see §5.7) |
+| 8–20 | TransformStack | 13 | Binary | Serialized transform decisions (see §5.8) |
 
 The `compressed_size` bytes immediately following the header are the rANS-encoded
-LZ77 token stream (§5.8).
+LZ77 token stream (§5.9).
 
 ### 3.6 Archive Trailing Checksum
 
@@ -225,6 +237,8 @@ A 36-byte block at the end of the archive:
      [LZ77 Tokenizer]
   - 3-entry LRU repcode cache
   - Position-based min_match (3 or 4)
+  - Greedy/lazy (Tiny/Fast/Balanced)
+    or optimal parser (Maximum/Extreme, §5.6.1)
                │
                ▼
   [Stream-Separated Serialization]
@@ -353,6 +367,60 @@ size equal to the level's window size (up to 256 MB). It uses:
 | `Match { distance, length }` | flag = 1 | Back-reference by distance slot + extra bits |
 | `RepMatch { index, length }` | flag = 2 | Reference to repcode cache entry 0, 1, or 2 |
 
+At the Tiny, Fast, and Balanced levels, matches are selected by a hash-chain match
+finder with greedy (Fast) or lazy (Balanced) selection. At the Maximum and Extreme
+levels, match selection is performed by the optimal parser described in §5.6.1.
+
+### 5.6.1 Optimal Parsing (Maximum / Extreme levels)
+
+At the Maximum and Extreme levels, FLUX replaces greedy/lazy match selection with a
+binary-tree match finder feeding a cost-based optimal parser. This is an
+**encoder-only** change: it selects a different (cheaper) sequence of the same token
+types defined in §5.6, so the archive format and the decoder are unchanged. Lower
+levels are unaffected.
+
+Source: `crates/flux-core/src/compress/lz77.rs` — `MatchFinder::BinaryTree`,
+`find_all_matches()`, `encode_optimal()`.
+
+**Binary-tree match finder.** Window positions are indexed in a binary search tree
+ordered by suffix comparison (two `u32` link arrays, `bt_left` / `bt_right`;
+~8 bytes per window position, allocated only on Maximum/Extreme). Unlike the
+depth-capped hash chains used at lower levels, the tree reliably returns the longest
+match and can return *multiple* candidate matches (`find_all_matches`) for the parser
+to choose among. Tree search is decoupled from tree insertion, so the parser may
+inspect candidates at look-ahead positions without mutating the structure. Search
+honors a node-comparison cap and a "good enough" target length for tunable speed.
+
+**Two-pass entropy-aware pricing.** Because FLUX uses static per-block rANS tables
+(§5.10), the parser needs cost estimates before final encoding. Each sub-block is
+processed in two passes:
+
+1. *Stats pass*: a fast provisional parse produces approximate token frequencies,
+   from which per-symbol bit-prices are derived for each of the five streams (flags,
+   literals, lengths, distance slots, repcode indices). Prices use a deterministic
+   fixed-point log2 (a precomputed fractional table in 24.8 fixed-point) — no
+   floating-point, ensuring identical output across platforms.
+2. *Optimal pass*: a forward dynamic program computes, for each input position, the
+   minimum-bit-cost path to reach it. State per position includes the accumulated
+   price, a back-reference to recover the chosen token, and the 3-entry LRU
+   repcode-cache state (because a future `RepMatch`'s price depends on the repcode
+   cache at that position). The DP is evaluated in sliding windows of 16,384 bytes,
+   carrying the repcode-cache state across window boundaries.
+
+After the optimal token sequence is recovered (by walking the back-references), the
+final rANS tables are built from that sequence and the sub-block is encoded normally
+(§5.9–5.10).
+
+**Why this helps.** Greedy/longest-match parsing can be far from bit-optimal: taking
+a long match at a large (expensive) distance may cost more than a slightly shorter
+match at a cheap, repcode-eligible distance followed by additional matches. The
+optimal parser minimizes total coded bits, which both shrinks the distance stream on
+text and improves match selection on structured data.
+
+**Cost.** Optimal parsing is much slower to compress than greedy/lazy (the parser
+evaluates many candidate paths). This is the intended trade-off for the
+Maximum/Extreme "best ratio" levels. Decompression is unaffected.
+
 ### 5.7 Distance Slots
 
 Distances are encoded using a slot system that covers windows up to 256 MB.
@@ -419,7 +487,7 @@ for forward-compatibility.
 The PPM code is retained because it was measured to gain ~1% on pure prose but
 slightly hurt mixed-data scenarios. The decision to disable it is recorded in the
 source comments and can be reversed by setting `ppm_applied = true` for specific
-levels.
+levels. See §8.2.
 
 ### 5.9 Stream-Separated Serialization (LZ77 Block Layout)
 
@@ -456,6 +524,9 @@ overhead per sub-block.
 
 When `ppm_class` ≠ 0: the literals frequency table is omitted, so 4 × 512 = **2,048
 bytes** of table overhead.
+
+Note: the optimal parser (§5.6.1) does not change this layout. It only changes which
+tokens are produced; the serialized stream format is identical regardless of parser.
 
 ### 5.10 rANS Entropy Coding
 
@@ -580,7 +651,7 @@ By employing per-plane adaptive entropy tests, FLUX detects this noise wall:
   amplifying it).
 
 This targeted approach, combined with the 3-byte match optimization, allows FLUX to
-compress `sensor_log.bin` to **4.46x**, easily beating `zstd -19` (3.29x).
+compress `sensor_log.bin` to **4.46x** (Balanced), easily beating `zstd -19` (3.29x).
 
 ### 8.5 Large Deterministic Window Ladder
 
@@ -588,6 +659,25 @@ The five-level window ladder (256 KB → 4 MB → 32 MB → 128 MB → 256 MB) p
 deterministic decompression memory requirements. The window size is written
 explicitly into the plaintext header (§3.1) so the decoder can always make a
 binary go/no-go allocation decision before touching any compressed data.
+
+### 8.6 Optimal Parsing at High Levels
+
+Lower levels prioritize speed with hash-chain greedy/lazy matching.
+Maximum/Extreme add a binary-tree match finder and a cost-based optimal parser
+(§5.6.1). The parser prices each encoding choice against the actual static-rANS
+stream costs (via a two-pass scheme analogous to a pre-analysis pass) and selects
+the minimum-bit-cost token sequence.
+
+Measured impact (15 MB structured datasets / 11.87 MB prose):
+- coordinates_xyz: 51.7x (Balanced) → 81.6x (Maximum), exceeding RAR -m5 (64.3x).
+- Gutenberg prose: 2.62x → 3.30x, with the distance stream reduced by ~15.6%;
+  competitive with zstd-19 and beating RAR -m5.
+- All structured datasets improved with no regressions.
+
+The trade-off is compression speed: the optimal parser is markedly slower than
+greedy/lazy (the analysis evaluates many candidate paths). Decompression is
+unaffected because the parser is encoder-only — it emits the standard token
+vocabulary the existing decoder reads.
 
 ---
 
@@ -598,6 +688,8 @@ binary go/no-go allocation decision before touching any compressed data.
 | **rANS** | range-Asymmetric Numeral Systems — fast entropy coder with O(1) encode/decode per symbol |
 | **BWT** | Burrows-Wheeler Transform — reversible block-sort that groups repeated contexts |
 | **PPM** | Prediction by Partial Matching — adaptive context model (Order-4 in FLUX, currently disabled) |
+| **Optimal parser** | Cost-based dynamic-programming parser (Maximum/Extreme) that selects the minimum-bit-cost token sequence |
+| **Binary-tree match finder** | Suffix-ordered binary search tree over window positions; returns multiple candidate matches for the optimal parser |
 | **Repcode** | Repeat-offset cache entry; encodes a back-reference to a recently used distance |
 | **Stride** | Byte period of a structured data type (e.g., 12 bytes for 3×f32 XYZ coordinates) |
 | **Plane** | One of the 4 byte positions within a multi-byte data element (e.g., exponent byte, mantissa byte) |
