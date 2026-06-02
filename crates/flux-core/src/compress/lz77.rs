@@ -70,6 +70,122 @@ pub struct Lz77Match {
     pub length: u16,
 }
 
+const LOG2_FRACTION_TABLE: [u8; 256] = [
+    0, 1, 3, 4, 6, 7, 9, 10, 11, 13, 14, 16, 17, 18, 20, 21, 22, 24, 25, 26, 28, 29, 30, 32, 33, 34, 36, 37, 38, 40, 41, 42, 44, 45, 46, 47, 49, 50, 51, 52, 54, 55, 56, 57, 59, 60, 61, 62, 63, 65, 66, 67, 68, 69, 71, 72, 73, 74, 75, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90, 92, 93, 94, 95, 96, 97, 98, 99, 100, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 178, 179, 180, 181, 182, 183, 184, 185, 185, 186, 187, 188, 189, 190, 191, 192, 192, 193, 194, 195, 196, 197, 198, 198, 199, 200, 201, 202, 203, 203, 204, 205, 206, 207, 208, 208, 209, 210, 211, 212, 212, 213, 214, 215, 216, 216, 217, 218, 219, 220, 220, 221, 222, 223, 224, 224, 225, 226, 227, 228, 228, 229, 230, 231, 231, 232, 233, 234, 234, 235, 236, 237, 238, 238, 239, 240, 241, 241, 242, 243, 244, 244, 245, 246, 247, 247, 248, 249, 249, 250, 251, 252, 252, 253, 254, 255, 255
+];
+
+/// Computes log2(val) in 24.8 fixed-point representation.
+pub fn log2_fixed(val: u32) -> u32 {
+    if val == 0 {
+        return 0;
+    }
+    let lz = val.leading_zeros();
+    let integer_part = 31 - lz;
+    let shifted = if lz < 31 {
+        val.wrapping_shl(lz + 1)
+    } else {
+        0
+    };
+    let idx = (shifted >> 24) as usize;
+    let fraction = LOG2_FRACTION_TABLE[idx] as u32;
+    (integer_part << 8) + fraction
+}
+
+/// Price model estimating costs in 24.8 fixed-point bits.
+#[derive(Debug, Clone)]
+pub struct PriceModel {
+    pub flag_prices: [u32; 3],          // 0: Literal, 1: Match, 2: RepMatch
+    pub literal_prices: [u32; 256],
+    pub length_prices: [u32; 256],
+    pub slot_prices: [u32; 56],
+    pub rep_prices: [u32; 3],
+}
+
+impl PriceModel {
+    pub fn build(tokens: &[Lz77Token], _data_len: usize, min_match_map: &[u8]) -> Self {
+        let mut flag_freqs = [1u32; 3];
+        let mut literal_freqs = [1u32; 256];
+        let mut length_freqs = [1u32; 256];
+        let mut slot_freqs = [1u32; 56];
+        let mut rep_freqs = [1u32; 3];
+
+        let mut pos = 0;
+        for token in tokens {
+            match token {
+                Lz77Token::Literal(b) => {
+                    flag_freqs[0] += 1;
+                    literal_freqs[*b as usize] += 1;
+                    pos += 1;
+                }
+                Lz77Token::Match { distance, length } => {
+                    flag_freqs[1] += 1;
+                    let min_match = if pos < min_match_map.len() { min_match_map[pos] as u16 } else { 4u16 };
+                    let len_val = (length.saturating_sub(min_match)).min(255) as u8;
+                    length_freqs[len_val as usize] += 1;
+
+                    let (slot, _, _) = distance_to_slot(*distance);
+                    slot_freqs[slot as usize] += 1;
+                    pos += *length as usize;
+                }
+                Lz77Token::RepMatch { index, length } => {
+                    flag_freqs[2] += 1;
+                    let min_match = if pos < min_match_map.len() { min_match_map[pos] as u16 } else { 4u16 };
+                    let len_val = (length.saturating_sub(min_match)).min(255) as u8;
+                    length_freqs[len_val as usize] += 1;
+
+                    rep_freqs[*index as usize] += 1;
+                    pos += *length as usize;
+                }
+            }
+        }
+
+        let flag_total = flag_freqs.iter().sum::<u32>();
+        let literal_total = literal_freqs.iter().sum::<u32>();
+        let length_total = length_freqs.iter().sum::<u32>();
+        let slot_total = slot_freqs.iter().sum::<u32>();
+        let rep_total = rep_freqs.iter().sum::<u32>();
+
+        let log2_flag_total = log2_fixed(flag_total);
+        let log2_literal_total = log2_fixed(literal_total);
+        let log2_length_total = log2_fixed(length_total);
+        let log2_slot_total = log2_fixed(slot_total);
+        let log2_rep_total = log2_fixed(rep_total);
+
+        let mut flag_prices = [0u32; 3];
+        for i in 0..3 {
+            flag_prices[i] = log2_flag_total.saturating_sub(log2_fixed(flag_freqs[i]));
+        }
+
+        let mut literal_prices = [0u32; 256];
+        for i in 0..256 {
+            literal_prices[i] = log2_literal_total.saturating_sub(log2_fixed(literal_freqs[i]));
+        }
+
+        let mut length_prices = [0u32; 256];
+        for i in 0..256 {
+            length_prices[i] = log2_length_total.saturating_sub(log2_fixed(length_freqs[i]));
+        }
+
+        let mut slot_prices = [0u32; 56];
+        for i in 0..56 {
+            slot_prices[i] = log2_slot_total.saturating_sub(log2_fixed(slot_freqs[i]));
+        }
+
+        let mut rep_prices = [0u32; 3];
+        for i in 0..3 {
+            rep_prices[i] = log2_rep_total.saturating_sub(log2_fixed(rep_freqs[i]));
+        }
+
+        Self {
+            flag_prices,
+            literal_prices,
+            length_prices,
+            slot_prices,
+            rep_prices,
+        }
+    }
+}
+
 /// LZ77 Encoder using hash chains or binary tree and lazy matching.
 pub struct Lz77Encoder {
     /// The sliding window history.
@@ -115,6 +231,15 @@ pub fn hash_bits_for_window(window_size: usize) -> usize {
     } else {
         22
     }
+}
+
+/// DP state at each position in the optimal parser.
+#[derive(Clone, Copy, Debug)]
+pub struct OptState {
+    pub price: u32,
+    pub back_token: Option<Lz77Token>,
+    pub back_len: u16,
+    pub rep_offsets: [u32; 3],
 }
 
 impl Lz77Encoder {
@@ -253,6 +378,14 @@ impl Lz77Encoder {
     }
 
     pub fn encode(&mut self, data: &[u8]) -> Vec<Lz77Token> {
+        if self.match_finder == MatchFinder::BinaryTree {
+            self.encode_optimal(data)
+        } else {
+            self.encode_standard(data)
+        }
+    }
+
+    pub fn encode_standard(&mut self, data: &[u8]) -> Vec<Lz77Token> {
         if self.min_match_map.len() != data.len() {
             self.min_match_map.clear();
         }
@@ -372,6 +505,266 @@ impl Lz77Encoder {
         }
 
         tokens
+    }
+
+    pub fn encode_optimal(&mut self, data: &[u8]) -> Vec<Lz77Token> {
+        // Pass 1: Provisional parse to get stats
+        let provisional_tokens = self.encode_standard(data);
+
+        // Build the price model
+        let min_match_map = if self.min_match_map.is_empty() {
+            vec![4u8; data.len()]
+        } else {
+            self.min_match_map.clone()
+        };
+        let price_model = PriceModel::build(&provisional_tokens, data.len(), &min_match_map);
+
+        // Reset the encoder state for Pass 2
+        self.window.clear();
+        self.hash_table.fill(u32::MAX);
+        self.rep_offsets = [1, 4, 8];
+        
+        self.hash_chains[..data.len()].fill(u32::MAX);
+        self.bt_left[..data.len()].fill(u32::MAX);
+        self.bt_right[..data.len()].fill(u32::MAX);
+
+        let mut final_tokens = Vec::new();
+        let mut rep_offsets = [1u32, 4u32, 8u32];
+
+        // DP window size: 16384
+        const DP_WINDOW_SIZE: usize = 16384;
+        let mut chunk_start = 0;
+
+        while chunk_start < data.len() {
+            let chunk_end = (chunk_start + DP_WINDOW_SIZE).min(data.len());
+            let chunk_len = chunk_end - chunk_start;
+
+            // DP state array initialized with u32::MAX price (representing infinity)
+            let mut opt = vec![
+                OptState {
+                    price: u32::MAX,
+                    back_token: None,
+                    back_len: 0,
+                    rep_offsets: [1, 4, 8],
+                };
+                chunk_len + 1
+            ];
+
+            // Root state
+            opt[0] = OptState {
+                price: 0,
+                back_token: None,
+                back_len: 0,
+                rep_offsets,
+            };
+
+            let mut skip_until = 0;
+
+            for i in 0..chunk_len {
+                let pos = chunk_start + i;
+
+                if i < skip_until {
+                    self.update_hash(data, pos);
+                    continue;
+                }
+
+                let curr_state = opt[i];
+                if curr_state.price == u32::MAX {
+                    continue;
+                }
+
+                let curr_price = curr_state.price;
+                let curr_reps = curr_state.rep_offsets;
+                let min_match = if pos < min_match_map.len() { min_match_map[pos] as usize } else { 4usize };
+
+                // 1. Literal transition
+                let lit_cost = price_model.flag_prices[0] + price_model.literal_prices[data[pos] as usize];
+                let lit_price = curr_price.saturating_add(lit_cost);
+                if lit_price < opt[i + 1].price {
+                    opt[i + 1] = OptState {
+                        price: lit_price,
+                        back_token: Some(Lz77Token::Literal(data[pos])),
+                        back_len: 1,
+                        rep_offsets: curr_reps,
+                    };
+                }
+
+                // Collect candidates from Binary Tree
+                let matches = self.find_all_matches(data, pos);
+
+                // Collect matches from rep offsets
+                let mut rep_matches = Vec::new();
+                for (rep_idx, &dist) in curr_reps.iter().enumerate() {
+                    let len = self.get_match_len_at_dist(data, pos, dist as usize);
+                    let len = len.min(chunk_len - i);
+                    if len >= min_match {
+                        rep_matches.push((rep_idx, len));
+                    }
+                }
+
+                // We track if there's any extremely long match to trigger early-abort skip
+                let mut best_skip_len = 0;
+                let mut best_skip_token = None;
+                let mut best_skip_cost = u32::MAX;
+                let mut best_skip_reps = curr_reps;
+
+                // Evaluate Match options
+                for m in &matches {
+                    let dist = m.distance;
+                    let max_len = (m.length as usize).min(chunk_len - i);
+
+                    for len in min_match..=max_len {
+                        let len_val = (len.saturating_sub(min_match)).min(255);
+                        
+                        // Check if this distance is in the current repcode cache
+                        let mut rep_idx = None;
+                        for (r, &offset) in curr_reps.iter().enumerate() {
+                            if offset == dist {
+                                rep_idx = Some(r);
+                                break;
+                            }
+                        }
+
+                        let (cost, next_reps) = if let Some(idx) = rep_idx {
+                            let c = price_model.flag_prices[2] + price_model.length_prices[len_val] + price_model.rep_prices[idx];
+                            let mut nr = curr_reps;
+                            if idx == 1 {
+                                nr.swap(0, 1);
+                            } else if idx == 2 {
+                                let tmp0 = nr[0];
+                                let tmp1 = nr[1];
+                                nr[0] = nr[2];
+                                nr[1] = tmp0;
+                                nr[2] = tmp1;
+                            }
+                            (c, nr)
+                        } else {
+                            let (slot, _, extra_bits) = distance_to_slot(dist);
+                            let c = price_model.flag_prices[1] + price_model.length_prices[len_val] + price_model.slot_prices[slot as usize] + extra_bits as u32 * 256;
+                            let nr = [dist, curr_reps[0], curr_reps[1]];
+                            (c, nr)
+                        };
+
+                        let cand_price = curr_price.saturating_add(cost);
+                        if cand_price < opt[i + len].price {
+                            opt[i + len] = OptState {
+                                price: cand_price,
+                                back_token: Some(match rep_idx {
+                                    Some(idx) => Lz77Token::RepMatch { index: idx as u8, length: len as u16 },
+                                    None => Lz77Token::Match { distance: dist, length: len as u16 },
+                                }),
+                                back_len: len as u16,
+                                rep_offsets: next_reps,
+                            };
+                        }
+
+                        // Check early-abort/skip condition
+                        if len >= self.good_match && len > best_skip_len {
+                            best_skip_len = len;
+                            best_skip_token = Some(match rep_idx {
+                                Some(idx) => Lz77Token::RepMatch { index: idx as u8, length: len as u16 },
+                                None => Lz77Token::Match { distance: dist, length: len as u16 },
+                            });
+                            best_skip_cost = cand_price;
+                            best_skip_reps = next_reps;
+                        }
+                    }
+                }
+
+                // Evaluate RepMatch direct options (that might not be in matches)
+                for &(idx, len) in &rep_matches {
+                    for l in min_match..=len {
+                        let len_val = (l.saturating_sub(min_match)).min(255);
+                        let cost = price_model.flag_prices[2] + price_model.length_prices[len_val] + price_model.rep_prices[idx];
+                        
+                        let mut nr = curr_reps;
+                        if idx == 1 {
+                            nr.swap(0, 1);
+                        } else if idx == 2 {
+                            let tmp0 = nr[0];
+                            let tmp1 = nr[1];
+                            nr[0] = nr[2];
+                            nr[1] = tmp0;
+                            nr[2] = tmp1;
+                        }
+
+                        let cand_price = curr_price.saturating_add(cost);
+                        if cand_price < opt[i + l].price {
+                            opt[i + l] = OptState {
+                                price: cand_price,
+                                back_token: Some(Lz77Token::RepMatch { index: idx as u8, length: l as u16 }),
+                                back_len: l as u16,
+                                rep_offsets: nr,
+                            };
+                        }
+
+                        // Check early-abort/skip condition
+                        if l >= self.good_match && l > best_skip_len {
+                            best_skip_len = l;
+                            best_skip_token = Some(Lz77Token::RepMatch { index: idx as u8, length: l as u16 });
+                            best_skip_cost = cand_price;
+                            best_skip_reps = nr;
+                        }
+                    }
+                }
+
+                // Trigger early-abort if we found an extremely long match
+                if best_skip_len >= self.good_match {
+                    if best_skip_cost < opt[i + best_skip_len].price {
+                        opt[i + best_skip_len] = OptState {
+                            price: best_skip_cost,
+                            back_token: best_skip_token,
+                            back_len: best_skip_len as u16,
+                            rep_offsets: best_skip_reps,
+                        };
+                    }
+                    skip_until = i + best_skip_len;
+                }
+
+                // Always insert pos into the BST
+                self.update_hash(data, pos);
+            }
+
+            // Reconstruct optimal tokens for this chunk
+            let mut chunk_tokens = Vec::new();
+            let mut curr = chunk_len;
+            while curr > 0 {
+                let state = &opt[curr];
+                if let Some(t) = state.back_token {
+                    chunk_tokens.push(t);
+                    curr -= state.back_len as usize;
+                } else {
+                    // Safety fallback: if unreachable, emit literals
+                    let lit_count = curr;
+                    for k in (0..lit_count).rev() {
+                        chunk_tokens.push(Lz77Token::Literal(data[chunk_start + k]));
+                    }
+                    break;
+                }
+            }
+
+            // Append chunk tokens in forward order
+            chunk_tokens.reverse();
+            final_tokens.extend_from_slice(&chunk_tokens);
+
+            // Update encoder's rep_offsets state for the next chunk
+            rep_offsets = opt[chunk_len].rep_offsets;
+
+            chunk_start = chunk_end;
+        }
+
+        // Fill window correctly to maintain history constraints
+        for &b in data {
+            self.window.push_back(b);
+            if self.window.len() > self.window_size {
+                self.window.pop_front();
+            }
+        }
+
+        // Save the final rep offsets to self.rep_offsets
+        self.rep_offsets = rep_offsets;
+
+        final_tokens
     }
 
     /// Finds the best match at the given position in the data block.
@@ -1155,6 +1548,40 @@ mod tests {
             encoder.update_hash(data, i);
         }
         assert_eq!(encoder.find_best_match(data, 6), Some((6, 5)));
+    }
+
+    #[test]
+    fn test_log2_fixed() {
+        for val in 1..10000 {
+            let fixed = log2_fixed(val);
+            let float = (val as f64).log2() * 256.0;
+            let diff = (fixed as f64 - float).abs();
+            assert!(diff <= 2.0, "Mismatch at val {}: fixed={}, float={}, diff={}", val, fixed, float, diff);
+        }
+        for val in (10000..1000000).step_by(123) {
+            let fixed = log2_fixed(val);
+            let float = (val as f64).log2() * 256.0;
+            let diff = (fixed as f64 - float).abs();
+            assert!(diff <= 2.0, "Mismatch at val {}: fixed={}, float={}, diff={}", val, fixed, float, diff);
+        }
+    }
+
+    #[test]
+    fn test_optimal_parse_roundtrip() {
+        let data = b"Optimal parsing uses a dynamic programming parser to find the optimal path. Optimal parsing uses a dynamic programming parser. Dynamic programming parser is very strong.".repeat(10);
+        let mut encoder = Lz77Encoder::new_with_params(
+            32 * 1024,
+            true,
+            4096,
+            258,
+            258,
+            MatchFinder::BinaryTree,
+        );
+        let tokens = encoder.encode(&data);
+
+        let mut decoder = Lz77Decoder::new();
+        let decoded = decoder.decode(&tokens);
+        assert_eq!(data.to_vec(), decoded, "Decompressed output does not match original data!");
     }
 }
 
