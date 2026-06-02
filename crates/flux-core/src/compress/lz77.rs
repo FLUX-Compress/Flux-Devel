@@ -52,17 +52,35 @@ pub enum Lz77Token {
     },
 }
 
-/// LZ77 Encoder using hash chains and lazy matching.
+/// LZ77 Match finder type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchFinder {
+    /// Standard hash-chain match finder.
+    HashChain,
+    /// Binary search tree match finder.
+    BinaryTree,
+}
+
+/// LZ77 Match candidate containing distance and length.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Lz77Match {
+    /// Distance back in the sliding window.
+    pub distance: u32,
+    /// Length of the matching sequence.
+    pub length: u16,
+}
+
+/// LZ77 Encoder using hash chains or binary tree and lazy matching.
 pub struct Lz77Encoder {
     /// The sliding window history.
     pub window: VecDeque<u8>,
-    /// Hash table mapping a hash to a position in the input data.
+    /// Hash table mapping a hash to a position in the input data (or root of BST).
     pub hash_table: Vec<u32>,
     /// Hash chains mapping a position to a previous position with the same hash.
     pub hash_chains: Vec<u32>,
     /// Whether lazy matching is enabled.
     pub lazy_matching: bool,
-    /// Maximum search depth in the hash chain.
+    /// Maximum search depth in the hash chain / BST comparison limit.
     pub max_chain_depth: usize,
     /// Lazy match threshold (defer match if lookahead is better and current length is below this).
     pub lazy_match_threshold: usize,
@@ -76,6 +94,12 @@ pub struct Lz77Encoder {
     pub window_size: usize,
     /// Hash bits used for the dynamic hash table.
     pub hash_bits: usize,
+    /// Which match finder is selected.
+    pub match_finder: MatchFinder,
+    /// Left children in the suffix BST.
+    pub bt_left: Vec<u32>,
+    /// Right children in the suffix BST.
+    pub bt_right: Vec<u32>,
 }
 
 /// Returns the number of hash table address bits based on the window size.
@@ -102,6 +126,7 @@ impl Lz77Encoder {
             1024, // max_chain_depth
             128,  // lazy_match_threshold
             32,   // good_match
+            MatchFinder::HashChain,
         )
     }
 
@@ -112,6 +137,7 @@ impl Lz77Encoder {
         max_chain_depth: usize,
         lazy_match_threshold: usize,
         good_match: usize,
+        match_finder: MatchFinder,
     ) -> Self {
         let hash_bits = hash_bits_for_window(window_size);
         Self {
@@ -126,6 +152,9 @@ impl Lz77Encoder {
             min_match_map: Vec::new(),
             window_size,
             hash_bits,
+            match_finder,
+            bt_left: Vec::new(),
+            bt_right: Vec::new(),
         }
     }
 
@@ -236,6 +265,15 @@ impl Lz77Encoder {
         }
         self.hash_chains[..data.len()].fill(u32::MAX);
 
+        if self.match_finder == MatchFinder::BinaryTree {
+            if self.bt_left.len() < data.len() {
+                self.bt_left.resize(data.len(), u32::MAX);
+                self.bt_right.resize(data.len(), u32::MAX);
+            }
+            self.bt_left[..data.len()].fill(u32::MAX);
+            self.bt_right[..data.len()].fill(u32::MAX);
+        }
+
         let mut tokens = Vec::new();
         let mut pos = 0;
 
@@ -341,6 +379,60 @@ impl Lz77Encoder {
     /// Traverses the hash chain starting from the head in `hash_table`.
     /// Limits search depth to `self.max_chain_depth` to control compression ratio and speed.
     pub fn find_best_match(&self, data: &[u8], pos: usize) -> Option<(usize, usize)> {
+        if self.match_finder == MatchFinder::BinaryTree {
+            self.find_best_match_bt(data, pos)
+        } else {
+            let min_match = self.min_match_at(pos);
+            if pos + min_match > data.len() {
+                return None;
+            }
+
+            let h = if min_match == 3 {
+                self.hash3(data, pos)
+            } else {
+                self.hash4(data, pos)
+            };
+            let mut chain_head = self.hash_table[h];
+            let mut best_len = 0;
+            let mut best_dist = 0;
+            let mut depth = 0;
+
+            while chain_head != u32::MAX && depth < self.max_chain_depth {
+                let match_pos = chain_head as usize;
+
+                if match_pos >= pos || pos - match_pos > self.window_size {
+                    break;
+                }
+
+                // Measure match length
+                let max_len = (data.len() - pos).min(MAX_MATCH_LEN);
+                let mut len = 0;
+                while len < max_len && data[match_pos + len] == data[pos + len] {
+                    len += 1;
+                }
+
+                if len >= min_match && len > best_len {
+                    best_len = len;
+                    best_dist = pos - match_pos;
+                    if len >= self.good_match || len >= MAX_MATCH_LEN {
+                        break;
+                    }
+                }
+
+                chain_head = self.hash_chains[match_pos];
+                depth += 1;
+            }
+
+            if best_len >= min_match {
+                Some((best_dist, best_len))
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Finds the best match in the suffix BST.
+    pub fn find_best_match_bt(&self, data: &[u8], pos: usize) -> Option<(usize, usize)> {
         let min_match = self.min_match_at(pos);
         if pos + min_match > data.len() {
             return None;
@@ -351,20 +443,23 @@ impl Lz77Encoder {
         } else {
             self.hash4(data, pos)
         };
-        let mut chain_head = self.hash_table[h];
+        let mut curr = self.hash_table[h];
         let mut best_len = 0;
         let mut best_dist = 0;
         let mut depth = 0;
 
-        while chain_head != u32::MAX && depth < self.max_chain_depth {
-            let match_pos = chain_head as usize;
+        let max_compare = self.max_chain_depth;
+        let target_len = self.good_match;
+        let max_len = (data.len() - pos).min(MAX_MATCH_LEN);
+
+        while curr != u32::MAX && depth < max_compare {
+            let match_pos = curr as usize;
 
             if match_pos >= pos || pos - match_pos > self.window_size {
                 break;
             }
 
             // Measure match length
-            let max_len = (data.len() - pos).min(MAX_MATCH_LEN);
             let mut len = 0;
             while len < max_len && data[match_pos + len] == data[pos + len] {
                 len += 1;
@@ -373,12 +468,22 @@ impl Lz77Encoder {
             if len >= min_match && len > best_len {
                 best_len = len;
                 best_dist = pos - match_pos;
-                if len >= self.good_match || len >= MAX_MATCH_LEN {
+                if len >= target_len || len >= MAX_MATCH_LEN {
                     break;
                 }
             }
 
-            chain_head = self.hash_chains[match_pos];
+            if pos + len == data.len() && match_pos + len == data.len() {
+                break;
+            } else if pos + len == data.len() {
+                curr = self.bt_left[match_pos];
+            } else if match_pos + len == data.len() {
+                curr = self.bt_right[match_pos];
+            } else if data[pos + len] < data[match_pos + len] {
+                curr = self.bt_left[match_pos];
+            } else {
+                curr = self.bt_right[match_pos];
+            }
             depth += 1;
         }
 
@@ -389,20 +494,205 @@ impl Lz77Encoder {
         }
     }
 
-    /// Updates the hash table and chain for the sequence starting at `pos`.
-    pub fn update_hash(&mut self, data: &[u8], pos: usize) {
+    /// Finds all matches in the suffix BST (ordered by increasing lengths).
+    pub fn find_all_matches(&self, data: &[u8], pos: usize) -> Vec<Lz77Match> {
         let min_match = self.min_match_at(pos);
         if pos + min_match > data.len() {
-            return;
+            return Vec::new();
         }
+
         let h = if min_match == 3 {
             self.hash3(data, pos)
         } else {
             self.hash4(data, pos)
         };
-        let prev = self.hash_table[h];
-        self.hash_chains[pos] = prev;
+        let mut curr = self.hash_table[h];
+        let mut matches = Vec::new();
+        let mut depth = 0;
+        let mut best_len = 0;
+
+        let max_compare = self.max_chain_depth;
+        let target_len = self.good_match;
+        let max_len = (data.len() - pos).min(MAX_MATCH_LEN);
+
+        while curr != u32::MAX && depth < max_compare {
+            let match_pos = curr as usize;
+
+            if match_pos >= pos || pos - match_pos > self.window_size {
+                break;
+            }
+
+            let mut len = 0;
+            while len < max_len && data[match_pos + len] == data[pos + len] {
+                len += 1;
+            }
+
+            if len >= min_match && len > best_len {
+                best_len = len;
+                matches.push(Lz77Match {
+                    distance: (pos - match_pos) as u32,
+                    length: len as u16,
+                });
+                if len >= target_len || len >= MAX_MATCH_LEN {
+                    break;
+                }
+            }
+
+            if pos + len == data.len() && match_pos + len == data.len() {
+                break;
+            } else if pos + len == data.len() {
+                curr = self.bt_left[match_pos];
+            } else if match_pos + len == data.len() {
+                curr = self.bt_right[match_pos];
+            } else if data[pos + len] < data[match_pos + len] {
+                curr = self.bt_left[match_pos];
+            } else {
+                curr = self.bt_right[match_pos];
+            }
+            depth += 1;
+        }
+
+        matches
+    }
+
+    /// Inserts the node `pos` into the suffix BST and splits the tree.
+    pub fn insert_node_bt(&mut self, data: &[u8], pos: usize) {
+        let min_match = self.min_match_at(pos);
+        if pos + min_match > data.len() {
+            return;
+        }
+
+        let h = if min_match == 3 {
+            self.hash3(data, pos)
+        } else {
+            self.hash4(data, pos)
+        };
+
+        let mut curr = self.hash_table[h];
         self.hash_table[h] = pos as u32;
+
+        self.bt_left[pos] = u32::MAX;
+        self.bt_right[pos] = u32::MAX;
+
+        let mut left_parent = pos;
+        let mut left_is_left = true;
+        
+        let mut right_parent = pos;
+        let mut right_is_left = false;
+
+        let mut depth = 0;
+        let max_compare = self.max_chain_depth;
+        let target_len = self.good_match;
+        let max_len = (data.len() - pos).min(MAX_MATCH_LEN);
+
+        while curr != u32::MAX && depth < max_compare {
+            let match_pos = curr as usize;
+
+            if match_pos >= pos || pos - match_pos > self.window_size {
+                break;
+            }
+
+            let mut len = 0;
+            while len < max_len && data[match_pos + len] == data[pos + len] {
+                len += 1;
+            }
+
+            if len >= target_len || len >= MAX_MATCH_LEN {
+                if left_is_left {
+                    self.bt_left[left_parent] = self.bt_left[match_pos];
+                } else {
+                    self.bt_right[left_parent] = self.bt_left[match_pos];
+                }
+                if right_is_left {
+                    self.bt_left[right_parent] = self.bt_right[match_pos];
+                } else {
+                    self.bt_right[right_parent] = self.bt_right[match_pos];
+                }
+                return;
+            }
+
+            if pos + len == data.len() && match_pos + len == data.len() {
+                if left_is_left {
+                    self.bt_left[left_parent] = self.bt_left[match_pos];
+                } else {
+                    self.bt_right[left_parent] = self.bt_left[match_pos];
+                }
+                if right_is_left {
+                    self.bt_left[right_parent] = self.bt_right[match_pos];
+                } else {
+                    self.bt_right[right_parent] = self.bt_right[match_pos];
+                }
+                return;
+            } else if pos + len == data.len() {
+                if right_is_left {
+                    self.bt_left[right_parent] = curr;
+                } else {
+                    self.bt_right[right_parent] = curr;
+                }
+                right_parent = match_pos;
+                right_is_left = true;
+                curr = self.bt_left[match_pos];
+            } else if match_pos + len == data.len() {
+                if left_is_left {
+                    self.bt_left[left_parent] = curr;
+                } else {
+                    self.bt_right[left_parent] = curr;
+                }
+                left_parent = match_pos;
+                left_is_left = false;
+                curr = self.bt_right[match_pos];
+            } else if data[pos + len] < data[match_pos + len] {
+                if right_is_left {
+                    self.bt_left[right_parent] = curr;
+                } else {
+                    self.bt_right[right_parent] = curr;
+                }
+                right_parent = match_pos;
+                right_is_left = true;
+                curr = self.bt_left[match_pos];
+            } else {
+                if left_is_left {
+                    self.bt_left[left_parent] = curr;
+                } else {
+                    self.bt_right[left_parent] = curr;
+                }
+                left_parent = match_pos;
+                left_is_left = false;
+                curr = self.bt_right[match_pos];
+            }
+            depth += 1;
+        }
+
+        if left_is_left {
+            self.bt_left[left_parent] = u32::MAX;
+        } else {
+            self.bt_right[left_parent] = u32::MAX;
+        }
+        if right_is_left {
+            self.bt_left[right_parent] = u32::MAX;
+        } else {
+            self.bt_right[right_parent] = u32::MAX;
+        }
+    }
+
+    /// Updates the hash table and chain or suffix BST for the sequence starting at `pos`.
+    pub fn update_hash(&mut self, data: &[u8], pos: usize) {
+        if self.match_finder == MatchFinder::BinaryTree {
+            self.insert_node_bt(data, pos);
+        } else {
+            let min_match = self.min_match_at(pos);
+            if pos + min_match > data.len() {
+                return;
+            }
+            let h = if min_match == 3 {
+                self.hash3(data, pos)
+            } else {
+                self.hash4(data, pos)
+            };
+            let prev = self.hash_table[h];
+            self.hash_chains[pos] = prev;
+            self.hash_table[h] = pos as u32;
+        }
     }
 
     /// Computes a multiplicative hash value for 3 bytes starting at `pos`.
@@ -741,6 +1031,130 @@ mod tests {
             assert_eq!(reconstructed, dist, "Mismatch for distance {}", dist);
             assert!(slot <= 55, "Slot {} exceeded 55 for distance {}", slot, dist);
         }
+    }
+
+    fn brute_force_longest_match(data: &[u8], pos: usize, window_size: usize, min_match: usize) -> Option<(usize, usize)> {
+        if pos + min_match > data.len() {
+            return None;
+        }
+        let mut best_len = 0;
+        let mut best_dist = 0;
+        let max_len = (data.len() - pos).min(MAX_MATCH_LEN);
+        let start = pos.saturating_sub(window_size);
+        for match_pos in start..pos {
+            let mut len = 0;
+            while len < max_len && data[match_pos + len] == data[pos + len] {
+                len += 1;
+            }
+            if len >= min_match && len > best_len {
+                best_len = len;
+                best_dist = pos - match_pos;
+            }
+        }
+        if best_len >= min_match {
+            Some((best_dist, best_len))
+        } else {
+            None
+        }
+    }
+
+    #[test]
+    fn test_bst_correctness_against_brute_force() {
+        let mut data = Vec::new();
+        let pattern1 = b"abcdefg";
+        let pattern2 = b"xyz123";
+        for i in 0..100 {
+            if i % 3 == 0 {
+                data.extend_from_slice(pattern1);
+            } else if i % 3 == 1 {
+                data.extend_from_slice(pattern2);
+            } else {
+                data.extend_from_slice(b"something_else");
+            }
+        }
+
+        let mut encoder = Lz77Encoder::new_with_params(
+            32 * 1024,
+            false,
+            4096,
+            258,
+            258,
+            MatchFinder::BinaryTree,
+        );
+
+        encoder.bt_left = vec![u32::MAX; data.len()];
+        encoder.bt_right = vec![u32::MAX; data.len()];
+
+        let midpoint = data.len() / 2;
+        for i in 0..midpoint {
+            encoder.update_hash(&data, i);
+        }
+
+        for pos in midpoint..(data.len() - 10) {
+            let bst_match = encoder.find_best_match(&data, pos);
+            let bf_match = brute_force_longest_match(&data, pos, encoder.window_size, encoder.min_match_at(pos));
+            
+            if let (Some((_bst_dist, bst_len)), Some((_bf_dist, bf_len))) = (bst_match, bf_match) {
+                assert_eq!(bst_len, bf_len, "Length mismatch at pos {}", pos);
+            } else {
+                assert_eq!(bst_match, bf_match, "Mismatch at pos {}", pos);
+            }
+
+            let all_matches = encoder.find_all_matches(&data, pos);
+            if let Some((_best_dist, best_len)) = bst_match {
+                assert!(!all_matches.is_empty(), "find_all_matches returned empty but best match exists");
+                let has_len = all_matches.iter().any(|m| m.length == best_len as u16);
+                assert!(has_len, "find_all_matches didn't contain the best match length at pos {}", pos);
+            }
+
+            encoder.update_hash(&data, pos);
+        }
+    }
+
+    #[test]
+    fn test_bst_edge_cases() {
+        let data = b"a".repeat(1000);
+        let mut encoder = Lz77Encoder::new_with_params(
+            32 * 1024,
+            false,
+            4096,
+            258,
+            258,
+            MatchFinder::BinaryTree,
+        );
+        encoder.bt_left = vec![u32::MAX; data.len()];
+        encoder.bt_right = vec![u32::MAX; data.len()];
+
+        for i in 0..data.len() {
+            let bst_match = encoder.find_best_match(&data, i);
+            if i >= 4 && i + 4 <= data.len() {
+                assert!(bst_match.is_some(), "Match should exist at i = {}", i);
+                let (dist, len) = bst_match.unwrap();
+                assert_eq!(dist, 1);
+                assert_eq!(len, (data.len() - i).min(MAX_MATCH_LEN));
+            }
+            encoder.update_hash(&data, i);
+        }
+
+        let data = b"abcde_abcde";
+        let mut encoder = Lz77Encoder::new_with_params(
+            32 * 1024,
+            false,
+            4096,
+            258,
+            258,
+            MatchFinder::BinaryTree,
+        );
+        encoder.bt_left = vec![u32::MAX; data.len()];
+        encoder.bt_right = vec![u32::MAX; data.len()];
+
+        assert_eq!(encoder.find_best_match(data, 0), None);
+        encoder.update_hash(data, 0);
+
+        for i in 1..6 {
+            encoder.update_hash(data, i);
+        }
+        assert_eq!(encoder.find_best_match(data, 6), Some((6, 5)));
     }
 }
 

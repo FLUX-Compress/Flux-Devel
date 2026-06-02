@@ -1425,6 +1425,7 @@ fn compress_block(data: &[u8], block_type: archive::format::BlockType, level: Fl
                         256,   // max_chain_depth
                         16,    // lazy_match_threshold
                         16,    // good_match
+                        crate::compress::lz77::MatchFinder::HashChain,
                     )
                 }
                 FluxCompressionLevel::Fast => {
@@ -1434,6 +1435,7 @@ fn compress_block(data: &[u8], block_type: archive::format::BlockType, level: Fl
                         128,   // max_chain_depth
                         0,     // lazy_match_threshold
                         8,     // good_match
+                        crate::compress::lz77::MatchFinder::HashChain,
                     )
                 }
                 FluxCompressionLevel::Balanced => {
@@ -1443,6 +1445,7 @@ fn compress_block(data: &[u8], block_type: archive::format::BlockType, level: Fl
                         1024,  // max_chain_depth
                         128,   // lazy_match_threshold
                         32,    // good_match
+                        crate::compress::lz77::MatchFinder::HashChain,
                     )
                 }
                 FluxCompressionLevel::Maximum => {
@@ -1452,6 +1455,7 @@ fn compress_block(data: &[u8], block_type: archive::format::BlockType, level: Fl
                         4096,  // max_chain_depth
                         258,   // lazy_match_threshold
                         258,   // good_match
+                        crate::compress::lz77::MatchFinder::BinaryTree,
                     )
                 }
                 FluxCompressionLevel::Extreme => {
@@ -1461,6 +1465,7 @@ fn compress_block(data: &[u8], block_type: archive::format::BlockType, level: Fl
                         8192,  // max_chain_depth
                         258,   // lazy_match_threshold
                         258,   // good_match
+                        crate::compress::lz77::MatchFinder::BinaryTree,
                     )
                 }
             };
@@ -3090,6 +3095,7 @@ mod tests {
             4096,  // max_chain_depth
             258,   // lazy_match_threshold
             258,   // good_match
+            crate::compress::lz77::MatchFinder::HashChain,
         );
         let tokens = lz77_enc.encode(&transformed);
         
