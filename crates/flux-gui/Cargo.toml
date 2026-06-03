@@ -3,7 +3,7 @@
 # The name of the crate.
 name = "flux-gui"
 # The version of the GUI wrapper.
-version = "1.0.0"
+version = "1.2.0"
 # Rust edition to use for compilation.
 edition = "2021"
 # A brief description of the crate.

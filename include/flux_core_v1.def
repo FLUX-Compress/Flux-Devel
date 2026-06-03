@@ -1,0 +1,8 @@
+LIBRARY flux_core_v1.dll
+EXPORTS
+    flux_v1_compress
+    flux_v1_compress_directory
+    flux_v1_decompress
+    flux_v1_free_result
+    flux_v1_get_decompressed_size
+    flux_v1_get_version

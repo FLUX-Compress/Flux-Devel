@@ -3,7 +3,7 @@
 # The public name of the library under which it will be published to crates.io.
 name = "flux"
 # Semantic versioning (SemVer) of the safe wrapper library. Release version 1.0.0.
-version = "1.0.0"
+version = "1.2.0"
 # Specifies the version of the Cargo manifest and compilation rules to use.
 edition = "2021"
 # Human-readable description of the crate. Essential for crates.io search discoverability.

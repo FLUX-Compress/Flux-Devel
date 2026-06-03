@@ -3,7 +3,7 @@
 # The name of the crate. Named with the "-sys" suffix to denote raw, unsafe FFI bindings.
 name = "flux-sys"
 # The current version of this crate.
-version = "1.0.0"
+version = "1.2.0"
 # Rust edition to use for compilation.
 edition = "2021"
 # Authors/Contributors of the project.

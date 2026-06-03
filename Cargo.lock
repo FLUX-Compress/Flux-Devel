@@ -1566,7 +1566,7 @@ dependencies = [
 
 [[package]]
 name = "flux"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "flux-core",
  "flux-sys",
@@ -1575,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "flux-cli"
-version = "0.1.0"
+version = "1.2.0"
 dependencies = [
  "clap",
  "flux",
@@ -1583,7 +1583,7 @@ dependencies = [
 
 [[package]]
 name = "flux-core"
-version = "0.1.0"
+version = "1.2.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -1603,7 +1603,7 @@ dependencies = [
 
 [[package]]
 name = "flux-gui"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "directories",
  "eframe",
@@ -1621,7 +1621,7 @@ dependencies = [
 
 [[package]]
 name = "flux-sys"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "flux-core",
 ]
