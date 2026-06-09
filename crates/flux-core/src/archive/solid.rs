@@ -3,10 +3,10 @@
 //! Solid blocks group similar files together to preserve PPM models and dictionary contexts.
 //! The files within each block are sorted smallest-first to warm up PPM and prediction states.
 
-use std::collections::HashMap;
+use crate::analysis::ClassificationResult;
 use crate::archive::format::{BlockType, FileEntry, SolidBlock};
 use crate::threads::signals::{CompressionPipeline, ContentType};
-use crate::analysis::ClassificationResult;
+use std::collections::HashMap;
 
 /// Builder to accumulate files into a single solid compression block.
 #[derive(Debug, Clone)]
@@ -62,9 +62,14 @@ impl SolidBlockBuilder {
     /// Finalizes the block and returns both metadata and concatenated raw uncompressed data.
     pub fn build_with_data(mut self) -> (SolidBlock, Vec<u8>, Vec<FileEntry>) {
         // Sort files smallest first to warm up compression models gradually.
-        self.entries_with_data.sort_by_key(|(entry, _)| entry.original_size);
+        self.entries_with_data
+            .sort_by_key(|(entry, _)| entry.original_size);
 
-        let uncompressed_size = self.entries_with_data.iter().map(|(_, d)| d.len()).sum::<usize>();
+        let uncompressed_size = self
+            .entries_with_data
+            .iter()
+            .map(|(_, d)| d.len())
+            .sum::<usize>();
         let mut raw_data = Vec::with_capacity(uncompressed_size);
         let mut files = Vec::new();
         for (mut entry, data) in self.entries_with_data {
@@ -110,7 +115,9 @@ impl SolidBlockGrouper {
 
         for (file_idx, (entry, data)) in files.into_iter().enumerate() {
             let target_type = if let Some(cls) = classifications.get(&(file_idx as u64)) {
-                if cls.pipeline == CompressionPipeline::StoreRaw || cls.content_type == ContentType::Incompressible {
+                if cls.pipeline == CompressionPipeline::StoreRaw
+                    || cls.content_type == ContentType::Incompressible
+                {
                     BlockType::Raw
                 } else {
                     match cls.content_type {
@@ -202,37 +209,48 @@ mod tests {
         ];
 
         let mut classifications = HashMap::new();
-        classifications.insert(0, ClassificationResult {
-            content_type: ContentType::Text,
-            pipeline: CompressionPipeline::TextPipeline,
-            stride_hint: None,
-            window_size_recommendation: 4096,
-            confidence: 1.0,
-            estimated_ratio: 0.5,
-        });
-        classifications.insert(1, ClassificationResult {
-            content_type: ContentType::Incompressible,
-            pipeline: CompressionPipeline::StoreRaw,
-            stride_hint: None,
-            window_size_recommendation: 4096,
-            confidence: 1.0,
-            estimated_ratio: 1.0,
-        });
-        classifications.insert(2, ClassificationResult {
-            content_type: ContentType::Multimedia,
-            pipeline: CompressionPipeline::MultimediaPipeline,
-            stride_hint: Some(2),
-            window_size_recommendation: 4096,
-            confidence: 1.0,
-            estimated_ratio: 0.5,
-        });
+        classifications.insert(
+            0,
+            ClassificationResult {
+                content_type: ContentType::Text,
+                pipeline: CompressionPipeline::TextPipeline,
+                stride_hint: None,
+                window_size_recommendation: 4096,
+                confidence: 1.0,
+                estimated_ratio: 0.5,
+            },
+        );
+        classifications.insert(
+            1,
+            ClassificationResult {
+                content_type: ContentType::Incompressible,
+                pipeline: CompressionPipeline::StoreRaw,
+                stride_hint: None,
+                window_size_recommendation: 4096,
+                confidence: 1.0,
+                estimated_ratio: 1.0,
+            },
+        );
+        classifications.insert(
+            2,
+            ClassificationResult {
+                content_type: ContentType::Multimedia,
+                pipeline: CompressionPipeline::MultimediaPipeline,
+                stride_hint: Some(2),
+                window_size_recommendation: 4096,
+                confidence: 1.0,
+                estimated_ratio: 0.5,
+            },
+        );
 
         let builders = grouper.group_files(files, &classifications);
         // We expect one Text block, one Raw block, and one Multimedia block.
         assert_eq!(builders.len(), 3);
         assert!(builders.iter().any(|b| b.block_type == BlockType::Text));
         assert!(builders.iter().any(|b| b.block_type == BlockType::Raw));
-        assert!(builders.iter().any(|b| b.block_type == BlockType::Multimedia));
+        assert!(builders
+            .iter()
+            .any(|b| b.block_type == BlockType::Multimedia));
     }
 
     #[test]
@@ -244,7 +262,7 @@ mod tests {
 
         let (_, data, files) = builder.build_with_data();
         assert_eq!(data.len(), 1250);
-        
+
         // Check order of files in built state.
         assert_eq!(files[0].path, "small.rs");
         assert_eq!(files[1].path, "medium.rs");
@@ -259,19 +277,20 @@ mod tests {
     #[test]
     fn test_solid_block_incompressible_goes_to_raw() {
         let grouper = SolidBlockGrouper::new();
-        let files = vec![
-            (mock_file("data.zip", 2000), vec![0; 2000]),
-        ];
+        let files = vec![(mock_file("data.zip", 2000), vec![0; 2000])];
 
         let mut classifications = HashMap::new();
-        classifications.insert(0, ClassificationResult {
-            content_type: ContentType::Incompressible,
-            pipeline: CompressionPipeline::StoreRaw,
-            stride_hint: None,
-            window_size_recommendation: 0,
-            confidence: 1.0,
-            estimated_ratio: 1.0,
-        });
+        classifications.insert(
+            0,
+            ClassificationResult {
+                content_type: ContentType::Incompressible,
+                pipeline: CompressionPipeline::StoreRaw,
+                stride_hint: None,
+                window_size_recommendation: 0,
+                confidence: 1.0,
+                estimated_ratio: 1.0,
+            },
+        );
 
         let builders = grouper.group_files(files, &classifications);
         assert_eq!(builders.len(), 1);

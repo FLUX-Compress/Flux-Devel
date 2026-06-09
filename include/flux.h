@@ -90,7 +90,8 @@ typedef enum FluxResult {
     FLUX_ERR_IO            = 4,
     FLUX_ERR_CORRUPT_DATA  = 5,
     FLUX_ERR_WRONG_PASS    = 6,
-    FLUX_ERR_BUFFER_SMALL  = 7
+    FLUX_ERR_BUFFER_SMALL  = 7,
+    FLUX_ERR_UNSUPPORTED_FORMAT = 8
 } FluxResult;
 
 /* =========================================================================
@@ -141,7 +142,8 @@ typedef struct FluxProgressEvent {
  *   offset 12 : block_size   (uint32_t, 4 bytes)
  *   offset 16 : level        (FluxCompressionLevel / int, 4 bytes)
  *   offset 20 : [4-byte end-alignment pad — not a field]
- *   sizeof    : 24 bytes
+ *   offset 24 : volume_size  (uint64_t, 8 bytes)
+ *   sizeof    : 32 bytes
  *
  * Always zero-initialise before setting fields:
  *
@@ -160,6 +162,8 @@ typedef struct FluxOptions {
     uint32_t block_size;
     /** Compression level / algorithm selector. */
     FluxCompressionLevel level;
+    /** Target volume size in bytes (0 = single-volume / no splitting). */
+    uint64_t volume_size;
 } FluxOptions;
 
 /* =========================================================================

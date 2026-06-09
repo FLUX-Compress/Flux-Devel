@@ -54,10 +54,10 @@
 //!           [Archive]
 //! ```
 
-pub mod keys;
-pub mod stream;
-pub mod sentinel;
 pub mod header;
+pub mod keys;
+pub mod sentinel;
+pub mod stream;
 
 use std::fmt;
 use zeroize::Zeroize;
@@ -115,7 +115,10 @@ impl fmt::Display for CryptoError {
         match self {
             Self::WrongPassword => write!(f, "Incorrect password provided"),
             Self::CorruptData => write!(f, "Archive data is corrupted or truncated"),
-            Self::AuthenticationFailed => write!(f, "Authentication tag verification failed (tampering detected)"),
+            Self::AuthenticationFailed => write!(
+                f,
+                "Authentication tag verification failed (tampering detected)"
+            ),
             Self::KeyDerivationFailed(err) => write!(f, "Key derivation failed: {}", err),
             Self::InvalidParameter(err) => write!(f, "Invalid parameter: {}", err),
         }

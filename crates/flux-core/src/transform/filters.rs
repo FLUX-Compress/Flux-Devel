@@ -37,7 +37,10 @@ pub struct AudioDeltaFilter {
 impl AudioDeltaFilter {
     /// Creates a new `AudioDeltaFilter`.
     pub fn new(channels: u8, bit_depth: u8) -> Self {
-        Self { channels, bit_depth }
+        Self {
+            channels,
+            bit_depth,
+        }
     }
 }
 
@@ -65,7 +68,9 @@ impl MediaFilter for AudioDeltaFilter {
             match bytes_per_sample {
                 1 => buf[idx] as u32,
                 2 => u16::from_le_bytes([buf[idx], buf[idx + 1]]) as u32,
-                3 => (buf[idx] as u32) | ((buf[idx + 1] as u32) << 8) | ((buf[idx + 2] as u32) << 16),
+                3 => {
+                    (buf[idx] as u32) | ((buf[idx + 1] as u32) << 8) | ((buf[idx + 2] as u32) << 16)
+                }
                 _ => u32::from_le_bytes([buf[idx], buf[idx + 1], buf[idx + 2], buf[idx + 3]]),
             }
         };
@@ -134,7 +139,9 @@ impl MediaFilter for AudioDeltaFilter {
             match bytes_per_sample {
                 1 => buf[idx] as u32,
                 2 => u16::from_le_bytes([buf[idx], buf[idx + 1]]) as u32,
-                3 => (buf[idx] as u32) | ((buf[idx + 1] as u32) << 8) | ((buf[idx + 2] as u32) << 16),
+                3 => {
+                    (buf[idx] as u32) | ((buf[idx + 1] as u32) << 8) | ((buf[idx + 2] as u32) << 16)
+                }
                 _ => u32::from_le_bytes([buf[idx], buf[idx + 1], buf[idx + 2], buf[idx + 3]]),
             }
         };
@@ -223,11 +230,11 @@ impl MediaFilter for FloatSplitFilter {
             let mantissa_low = (mantissa & 0x7F) as u8;
 
             output[p0_start + i] = exponent as u8;
-            
+
             let m_high_bytes = mantissa_high.to_le_bytes();
             output[p1_start + 2 * i] = m_high_bytes[0];
             output[p1_start + 2 * i + 1] = m_high_bytes[1];
-            
+
             output[p2_start + i] = mantissa_low | ((sign as u8) << 7);
         }
 
@@ -252,11 +259,11 @@ impl MediaFilter for FloatSplitFilter {
 
         for i in 0..n {
             let exponent = data[p0_start + i] as u32;
-            
+
             let m_high_0 = data[p1_start + 2 * i];
             let m_high_1 = data[p1_start + 2 * i + 1];
             let mantissa_high = u16::from_le_bytes([m_high_0, m_high_1]) as u32;
-            
+
             let p2_val = data[p2_start + i];
             let mantissa_low = (p2_val & 0x7F) as u32;
             let sign = ((p2_val >> 7) & 1) as u32;
@@ -344,12 +351,8 @@ impl MediaFilter for FloatChannelSplitFilter {
         for i in 0..n {
             for ch in 0..channels {
                 let idx = (i * channels + ch) * 4;
-                let val = u32::from_le_bytes([
-                    data[idx],
-                    data[idx + 1],
-                    data[idx + 2],
-                    data[idx + 3],
-                ]);
+                let val =
+                    u32::from_le_bytes([data[idx], data[idx + 1], data[idx + 2], data[idx + 3]]);
                 channel_u32s[ch][i] = val;
             }
         }
@@ -401,7 +404,12 @@ impl MediaFilter for FloatChannelSplitFilter {
         }
 
         self.mask.set(computed_mask);
-        crate::flux_debug!("[FloatChannelSplit apply] computed mask = {:08b}, plane_size = {}, total_len = {}", computed_mask, plane_size, data.len());
+        crate::flux_debug!(
+            "[FloatChannelSplit apply] computed mask = {:08b}, plane_size = {}, total_len = {}",
+            computed_mask,
+            plane_size,
+            data.len()
+        );
 
         // Append remainder bytes
         let processed_len = n * 4 * channels;
@@ -423,7 +431,12 @@ impl MediaFilter for FloatChannelSplitFilter {
         let plane_size = n * channels;
         let mut output = vec![0u8; data.len()];
         let mask = self.mask.get();
-        crate::flux_debug!("[FloatChannelSplit reverse] using mask = {:08b}, plane_size = {}, total_len = {}", mask, plane_size, data.len());
+        crate::flux_debug!(
+            "[FloatChannelSplit reverse] using mask = {:08b}, plane_size = {}, total_len = {}",
+            mask,
+            plane_size,
+            data.len()
+        );
 
         // Reconstruct planes from data
         let mut planes = vec![vec![0u8; plane_size]; 4];
@@ -704,7 +717,10 @@ impl MediaFilter for RgbaDeltaFilter {
 pub fn apply_filter(filter_type: MediaFilterType, data: &[u8]) -> (Vec<u8>, MediaFilterType) {
     match filter_type {
         MediaFilterType::None => (data.to_vec(), MediaFilterType::None),
-        MediaFilterType::AudioDelta { channels, bit_depth } => {
+        MediaFilterType::AudioDelta {
+            channels,
+            bit_depth,
+        } => {
             let filter = AudioDeltaFilter::new(channels, bit_depth);
             (filter.apply(data), filter_type)
         }
@@ -723,7 +739,13 @@ pub fn apply_filter(filter_type: MediaFilterType, data: &[u8]) -> (Vec<u8>, Medi
         MediaFilterType::FloatChannelSplit { channels, mask } => {
             let filter = FloatChannelSplitFilter::new(channels, mask);
             let transformed = filter.apply(data);
-            (transformed, MediaFilterType::FloatChannelSplit { channels, mask: filter.mask.get() })
+            (
+                transformed,
+                MediaFilterType::FloatChannelSplit {
+                    channels,
+                    mask: filter.mask.get(),
+                },
+            )
         }
     }
 }
@@ -732,18 +754,13 @@ pub fn apply_filter(filter_type: MediaFilterType, data: &[u8]) -> (Vec<u8>, Medi
 pub fn reverse_filter(filter_type: MediaFilterType, data: &[u8]) -> Vec<u8> {
     match filter_type {
         MediaFilterType::None => data.to_vec(),
-        MediaFilterType::AudioDelta { channels, bit_depth } => {
-            AudioDeltaFilter::new(channels, bit_depth).reverse(data)
-        }
-        MediaFilterType::FloatSplit => {
-            FloatSplitFilter.reverse(data)
-        }
-        MediaFilterType::RgbSplit => {
-            RgbSplitFilter.reverse(data)
-        }
-        MediaFilterType::RgbaDelta => {
-            RgbaDeltaFilter.reverse(data)
-        }
+        MediaFilterType::AudioDelta {
+            channels,
+            bit_depth,
+        } => AudioDeltaFilter::new(channels, bit_depth).reverse(data),
+        MediaFilterType::FloatSplit => FloatSplitFilter.reverse(data),
+        MediaFilterType::RgbSplit => RgbSplitFilter.reverse(data),
+        MediaFilterType::RgbaDelta => RgbaDeltaFilter.reverse(data),
         MediaFilterType::FloatChannelSplit { channels, mask } => {
             FloatChannelSplitFilter::new(channels, mask).reverse(data)
         }
@@ -761,11 +778,11 @@ mod tests {
             0x12, 0x1F, // Stereo 8-bit frame 1
             0x15, 0x22, // Stereo 8-bit frame 2
         ];
-        
+
         let filter = AudioDeltaFilter::new(2, 8);
         let filtered = filter.apply(&original);
         let reversed = filter.reverse(&filtered);
-        
+
         assert_eq!(reversed, original);
     }
 
@@ -775,7 +792,7 @@ mod tests {
         let f1: f32 = 1.25;
         let f2: f32 = -99.5;
         let f3: f32 = 0.0003;
-        
+
         let mut original = Vec::new();
         original.extend_from_slice(&f1.to_le_bytes());
         original.extend_from_slice(&f2.to_le_bytes());
@@ -823,7 +840,7 @@ mod tests {
             let ch0 = 1.0f32;
             let ch1 = i as f32 * 0.1;
             let ch2 = (i as f32 * 543.21).sin() * 1000.0;
-            
+
             original.extend_from_slice(&ch0.to_le_bytes());
             original.extend_from_slice(&ch1.to_le_bytes());
             original.extend_from_slice(&ch2.to_le_bytes());
@@ -831,7 +848,7 @@ mod tests {
 
         let filter = FloatChannelSplitFilter::new(3, 0);
         let filtered = filter.apply(&original);
-        
+
         let computed_mask = filter.mask.get();
         let filter_reversed = FloatChannelSplitFilter::new(3, computed_mask);
         let reversed = filter_reversed.reverse(&filtered);
@@ -856,9 +873,9 @@ mod tests {
     #[test]
     fn test_rgba_delta_roundtrip() {
         let original = vec![
-            255, 0, 128, 64,  // RGBA 0
-            250, 5, 120, 64,  // RGBA 1
-            245, 8, 110, 64,  // RGBA 2
+            255, 0, 128, 64, // RGBA 0
+            250, 5, 120, 64, // RGBA 1
+            245, 8, 110, 64, // RGBA 2
         ];
 
         let filter = RgbaDeltaFilter;
@@ -870,15 +887,11 @@ mod tests {
 
     #[test]
     fn test_filter_dispatch() {
-        let original = vec![
-            255, 0, 128,
-            250, 5, 120,
-            245, 8, 110,
-        ];
-        
+        let original = vec![255, 0, 128, 250, 5, 120, 245, 8, 110];
+
         let (filtered, filter_type) = apply_filter(MediaFilterType::RgbSplit, &original);
         assert_eq!(filter_type, MediaFilterType::RgbSplit);
-        
+
         let reversed = reverse_filter(filter_type, &filtered);
         assert_eq!(reversed, original);
     }

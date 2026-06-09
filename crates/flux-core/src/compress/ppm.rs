@@ -49,10 +49,7 @@ pub enum PpmEvent {
         cumulative: f32,
     },
     /// Represents fallback to a lower-order context.
-    Escape {
-        order: usize,
-        escape_prob: f32,
-    },
+    Escape { order: usize, escape_prob: f32 },
 }
 
 /// PPM Model with adaptive contexts up to order-4.
@@ -81,7 +78,7 @@ impl PpmModel {
     pub fn new(max_arena_size: usize) -> Self {
         let max_ctx_count = max_arena_size / std::mem::size_of::<PpmContext>();
         let max_state_count = max_arena_size / std::mem::size_of::<PpmState>();
-        
+
         let mut model = Self {
             contexts: Vec::with_capacity(max_ctx_count),
             states: Vec::with_capacity(max_state_count),
@@ -212,7 +209,7 @@ impl PpmModel {
     /// Finds or creates a successor transition node from the context.
     pub fn find_or_create_transition(&mut self, ctx_idx: u32, s: u8) -> u32 {
         let num_stats = self.contexts[ctx_idx as usize].num_stats;
-        
+
         if num_stats == 1 {
             let successor = self.contexts[ctx_idx as usize].states_offset;
             if successor != 0 {
@@ -260,9 +257,15 @@ impl PpmModel {
     /// Scales the context statistics to fit exactly a 4096-slot rANS distribution.
     pub fn get_scaled_context(&self, ctx_idx: u32) -> [RansSymbol; 257] {
         let ctx = &self.contexts[ctx_idx as usize];
-        let mut scaled = [RansSymbol { freq: 0, cumfreq: 0 }; 257];
+        let mut scaled = [RansSymbol {
+            freq: 0,
+            cumfreq: 0,
+        }; 257];
         if ctx.num_stats == 0 {
-            scaled[256] = RansSymbol { freq: 4096, cumfreq: 0 };
+            scaled[256] = RansSymbol {
+                freq: 4096,
+                cumfreq: 0,
+            };
             return scaled;
         }
 
@@ -434,7 +437,10 @@ impl PpmModel {
     }
 
     /// Decodes a single symbol from rANS utilizing the PPM model contexts.
-    pub fn decode_literal(&mut self, decoder: &mut crate::compress::rans::RansDecoder) -> Result<u8, crate::archive::index::ArchiveError> {
+    pub fn decode_literal(
+        &mut self,
+        decoder: &mut crate::compress::rans::RansDecoder,
+    ) -> Result<u8, crate::archive::index::ArchiveError> {
         let mut highest_order = 0;
         for j in (0..=4).rev() {
             if self.active_contexts[j] != 0 {
@@ -455,7 +461,10 @@ impl PpmModel {
 
                 let mut decoded_sym = None;
                 for (sym, s_info) in scaled.iter().enumerate() {
-                    if s_info.freq > 0 && slot >= s_info.cumfreq && slot < s_info.cumfreq + s_info.freq {
+                    if s_info.freq > 0
+                        && slot >= s_info.cumfreq
+                        && slot < s_info.cumfreq + s_info.freq
+                    {
                         decoded_sym = Some(sym as u16);
                         break;
                     }
@@ -463,7 +472,8 @@ impl PpmModel {
 
                 let sym = decoded_sym.ok_or(crate::archive::index::ArchiveError::CorruptIndex)?;
                 let sym_info = scaled[sym as usize];
-                decoder.state = (sym_info.freq as u64) * (decoder.state >> 12) + (slot as u64) - (sym_info.cumfreq as u64);
+                decoder.state = (sym_info.freq as u64) * (decoder.state >> 12) + (slot as u64)
+                    - (sym_info.cumfreq as u64);
                 while decoder.state < (1 << 24) && decoder.pos > 0 {
                     decoder.pos -= 1;
                     let val = decoder.input[decoder.pos] as u64;
@@ -615,8 +625,8 @@ mod tests {
     fn test_ppm_new_symbol_gets_probability() {
         let model = PpmModel::new(1024);
         let scaled = model.get_scaled_context(0);
-        assert_eq!(scaled[100].freq, 0); 
-        assert_eq!(scaled[256].freq, 4096); 
+        assert_eq!(scaled[100].freq, 0);
+        assert_eq!(scaled[256].freq, 4096);
     }
 
     #[test]
@@ -625,7 +635,7 @@ mod tests {
         model.update(42);
         let scaled = model.get_scaled_context(0);
         assert!(scaled[42].freq > 0);
-        assert!(scaled[256].freq > 0); 
+        assert!(scaled[256].freq > 0);
     }
 
     #[test]

@@ -23,9 +23,9 @@ pub const MAX_BUFFER_CAPACITY: usize = 8 * 1024 * 1024 * 1024;
 pub fn detect_buffer_capacity() -> usize {
     let mut sys = System::new();
     sys.refresh_memory();
-    
+
     let total_memory = sys.total_memory() as usize;
     let target = total_memory / 10;
-    
+
     target.clamp(MIN_BUFFER_CAPACITY, MAX_BUFFER_CAPACITY)
 }

@@ -135,7 +135,7 @@ impl ProbabilityTable {
                 let new_val = freq[max_idx] as i32 + error;
                 freq[max_idx] = new_val.max(1) as u32;
             }
-            
+
             // Re-verify exact sum matches 4096 in case clamping was triggered
             let final_sum: u32 = freq.iter().sum();
             if final_sum != 4096 {
@@ -150,10 +150,7 @@ impl ProbabilityTable {
         self.symbols.clear();
         let mut cumfreq = 0;
         for &f in &freq {
-            self.symbols.push(RansSymbol {
-                freq: f,
-                cumfreq,
-            });
+            self.symbols.push(RansSymbol { freq: f, cumfreq });
             cumfreq += f;
         }
 
@@ -201,14 +198,16 @@ impl ProbabilityTable {
         // 3. Rounding adjustment: the symbol with the largest frequency absorbs the error
         let error = 4096_i32 - sum as i32;
         if error != 0 {
-            if let Some((max_idx, _)) = freq.iter().enumerate()
+            if let Some((max_idx, _)) = freq
+                .iter()
+                .enumerate()
                 .filter(|&(_, &f)| f > 0)
                 .max_by_key(|&(_, &f)| f)
             {
                 let new_val = freq[max_idx] as i32 + error;
                 freq[max_idx] = new_val.max(1) as u32;
             }
-            
+
             // Re-verify exact sum matches 4096 in case clamping was triggered
             let final_sum: u32 = freq.iter().sum();
             if final_sum != 4096 {
@@ -223,10 +222,7 @@ impl ProbabilityTable {
         let mut symbols = Vec::with_capacity(256);
         let mut cumfreq = 0;
         for &f in &freq {
-            symbols.push(RansSymbol {
-                freq: f,
-                cumfreq,
-            });
+            symbols.push(RansSymbol { freq: f, cumfreq });
             cumfreq += f;
         }
 
@@ -312,7 +308,7 @@ impl ProbabilityTable {
                 let new_val = freq[max_idx] as i32 + error;
                 freq[max_idx] = new_val.max(1) as u32;
             }
-            
+
             // Re-verify exact sum matches 4096 in case clamping was triggered
             let final_sum: u32 = freq.iter().sum();
             if final_sum != 4096 {
@@ -380,7 +376,7 @@ impl ProbabilityTable {
                 let new_val = freq[max_idx] as i32 + error;
                 freq[max_idx] = new_val.max(1) as u32;
             }
-            
+
             // Re-verify exact sum matches 4096 in case clamping was triggered
             let final_sum: u32 = freq.iter().sum();
             if final_sum != 4096 {
@@ -432,7 +428,11 @@ impl RansEncoder {
         let freq = sym_info.freq as u64;
         let cumfreq = sym_info.cumfreq as u64;
 
-        assert!(freq > 0, "Attempted to encode symbol '{}' with 0 frequency", symbol);
+        assert!(
+            freq > 0,
+            "Attempted to encode symbol '{}' with 0 frequency",
+            symbol
+        );
 
         // Normalize state to fit within target range
         let limit = freq << (32 - RANS_SCALE_BITS);
@@ -519,11 +519,7 @@ impl RansDecoder {
         let input = data[..len - 8].to_vec();
         let pos = input.len();
 
-        Self {
-            state,
-            input,
-            pos,
-        }
+        Self { state, input, pos }
     }
 
     /// Decodes a single symbol using its probability table.
@@ -565,8 +561,8 @@ impl RansDecoder {
 mod tests {
     use super::*;
     use crate::compress::lz77::{Lz77Encoder, Lz77Token};
-    use crate::compress::ppm::PpmModel;
     use crate::compress::mixer::ContextMixer;
+    use crate::compress::ppm::PpmModel;
 
     #[test]
     fn test_probability_table_sums_to_scale() {

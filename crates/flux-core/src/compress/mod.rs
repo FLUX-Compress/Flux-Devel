@@ -49,7 +49,7 @@
 //! ```
 
 pub mod lz77;
+pub mod mixer;
 pub mod ppm;
 pub mod rans;
-pub mod mixer;
 pub mod secondary;

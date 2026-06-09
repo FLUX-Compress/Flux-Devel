@@ -3,9 +3,9 @@
 //! Provides read-only windows of active data for analysis and compression threads,
 //! allowing zero-copy lookahead and history checks.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use super::circular::CircularBuffer;
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// A sliding window providing direct read-only views into the circular buffer.
 ///
@@ -58,7 +58,7 @@ impl SlidingWindow {
         );
         let start_pos = self.window_start.load(Ordering::Acquire);
         let read_start = (start_pos + offset) % self.buffer.capacity;
-        
+
         unsafe {
             let ptr = self.buffer.data.as_ptr().add(read_start);
             std::slice::from_raw_parts(ptr, len)
@@ -95,7 +95,7 @@ impl SlidingWindow {
             self.buffer.capacity
         );
         let read_start = start_pos % self.buffer.capacity;
-        
+
         unsafe {
             let ptr = self.buffer.data.as_ptr().add(read_start);
             std::slice::from_raw_parts(ptr, actual_len)

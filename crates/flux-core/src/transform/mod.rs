@@ -49,12 +49,12 @@
 //! A [`TransformStack`] structure is serialized and stored inside the archive header per-block.
 //! This ensures the decompressor never has to guess which transformations were applied.
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-pub mod delta;
-pub mod transpose;
 pub mod bwt;
+pub mod delta;
 pub mod filters;
+pub mod transpose;
 
 /// Media-specific specialized filters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,7 +134,7 @@ impl TransformStack {
         buf.push(self.delta_stride);
         buf.push(self.transpose_applied as u8);
         buf.push(self.transpose_stride);
-        
+
         let ppm_class = match (self.ppm_applied, self.ppm_arena_size) {
             (true, 8_388_608) => 1,
             (true, 33_554_432) => 2,
@@ -142,7 +142,7 @@ impl TransformStack {
             _ => 0,
         };
         buf.push(self.bwt_applied as u8 | (ppm_class << 1));
-        
+
         buf.extend_from_slice(&self.bwt_primary_index.to_le_bytes());
         buf.push(self.media_filter_applied as u8);
         match self.media_filter_type {
@@ -151,7 +151,10 @@ impl TransformStack {
                 buf.push(0);
                 buf.push(0);
             }
-            MediaFilterType::AudioDelta { channels, bit_depth } => {
+            MediaFilterType::AudioDelta {
+                channels,
+                bit_depth,
+            } => {
                 buf.push(1);
                 buf.push(channels);
                 buf.push(bit_depth);
@@ -189,7 +192,7 @@ impl TransformStack {
         let delta_stride = data[1];
         let transpose_applied = data[2] != 0;
         let transpose_stride = data[3];
-        
+
         let bwt_byte = data[4];
         let bwt_applied = (bwt_byte & 1) != 0;
         let ppm_class = (bwt_byte >> 1) & 3;
@@ -199,7 +202,7 @@ impl TransformStack {
             3 => (true, 67_108_864),
             _ => (false, 0),
         };
-        
+
         let bwt_primary_index = u32::from_le_bytes(data[5..9].try_into().unwrap());
         let media_filter_applied = data[9] != 0;
         let media_type = data[10];
@@ -208,26 +211,35 @@ impl TransformStack {
 
         let media_filter_type = match media_type {
             0 => MediaFilterType::None,
-            1 => MediaFilterType::AudioDelta { channels: param1, bit_depth: param2 },
+            1 => MediaFilterType::AudioDelta {
+                channels: param1,
+                bit_depth: param2,
+            },
             2 => MediaFilterType::FloatSplit,
             3 => MediaFilterType::RgbSplit,
             4 => MediaFilterType::RgbaDelta,
-            5 => MediaFilterType::FloatChannelSplit { channels: param1, mask: param2 },
+            5 => MediaFilterType::FloatChannelSplit {
+                channels: param1,
+                mask: param2,
+            },
             _ => return Err("Invalid media filter type".to_string()),
         };
 
-        Ok((Self {
-            delta_applied,
-            delta_stride,
-            transpose_applied,
-            transpose_stride,
-            bwt_applied,
-            bwt_primary_index,
-            media_filter_applied,
-            media_filter_type,
-            ppm_applied,
-            ppm_arena_size,
-        }, &data[13..]))
+        Ok((
+            Self {
+                delta_applied,
+                delta_stride,
+                transpose_applied,
+                transpose_stride,
+                bwt_applied,
+                bwt_primary_index,
+                media_filter_applied,
+                media_filter_type,
+                ppm_applied,
+                ppm_arena_size,
+            },
+            &data[13..],
+        ))
     }
 
     /// Applies the transform stack in compression order:
@@ -271,7 +283,8 @@ impl TransformStack {
 
         // 4. Media-Specific Filter (if already configured)
         if self.media_filter_applied {
-            let (transformed, updated_filter) = filters::apply_filter(self.media_filter_type, &data);
+            let (transformed, updated_filter) =
+                filters::apply_filter(self.media_filter_type, &data);
             data = transformed;
             self.media_filter_type = updated_filter;
         }

@@ -4,11 +4,11 @@
 //! computes animated thread/buffer visualizer statistics, and displays
 //! operation summaries upon completion.
 
-use std::path::{Path, PathBuf};
 use egui::{Color32, RichText, Ui};
+use std::path::{Path, PathBuf};
 
-use crate::app::FluxApp;
 use crate::app::AppView;
+use crate::app::FluxApp;
 use crate::components::progress_bar::FluxProgressBar;
 use crate::state::CompressionState;
 use crate::views::compress::format_size;
@@ -43,7 +43,11 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                 next_view = AppView::Home;
             }
         }
-        CompressionState::Running { progress, start_time, .. } => {
+        CompressionState::Running {
+            progress,
+            start_time,
+            ..
+        } => {
             let (percent, current_file, bytes_processed, bytes_total, _est_sec) = {
                 let guard = progress.lock().unwrap();
                 (
@@ -70,7 +74,11 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                 next_state = Some(CompressionState::Cancelled);
             }
         }
-        CompressionState::RunningExtract { progress, start_time, .. } => {
+        CompressionState::RunningExtract {
+            progress,
+            start_time,
+            ..
+        } => {
             let (percent, current_file, bytes_processed, bytes_total, _est_sec) = {
                 let guard = progress.lock().unwrap();
                 (
@@ -138,11 +146,15 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
         CompressionState::Failed(err_msg) => {
             ui.vertical_centered(|ui| {
                 ui.add_space(20.0);
-                ui.heading(RichText::new("⚠️ Operation Failed").color(Color32::from_rgb(220, 50, 50)).strong());
+                ui.heading(
+                    RichText::new("⚠️ Operation Failed")
+                        .color(Color32::from_rgb(220, 50, 50))
+                        .strong(),
+                );
                 ui.add_space(10.0);
                 ui.label(RichText::new(err_msg).size(14.0));
                 ui.add_space(20.0);
-                
+
                 if ui.button("Return to Home").clicked() {
                     next_view = AppView::Home;
                     next_state = Some(CompressionState::Idle);
@@ -152,9 +164,13 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
         CompressionState::Cancelled => {
             ui.vertical_centered(|ui| {
                 ui.add_space(20.0);
-                ui.heading(RichText::new("⏹ Operation Cancelled").color(Color32::from_rgb(220, 180, 50)).strong());
+                ui.heading(
+                    RichText::new("⏹ Operation Cancelled")
+                        .color(Color32::from_rgb(220, 180, 50))
+                        .strong(),
+                );
                 ui.add_space(20.0);
-                
+
                 if ui.button("Return to Home").clicked() {
                     next_view = AppView::Home;
                     next_state = Some(CompressionState::Idle);
@@ -186,7 +202,7 @@ fn render_running_view(
 ) -> bool {
     let elapsed = start_time.elapsed().as_secs_f32();
     let mut cancel_clicked = false;
-    
+
     // Speed (MB/s)
     let speed_mbs = if elapsed > 0.1 {
         (bytes_processed as f64 / (1024.0 * 1024.0)) / elapsed as f64
@@ -208,7 +224,9 @@ fn render_running_view(
         ui.add_space(10.0);
 
         // Progress bar
-        app.progress_view.progress_bar.show(ui, percent, "Overall Progress:");
+        app.progress_view
+            .progress_bar
+            .show(ui, percent, "Overall Progress:");
         ui.add_space(10.0);
 
         // File and metrics
@@ -218,13 +236,17 @@ fn render_running_view(
             current_file
         };
         ui.label(RichText::new(format!("Current File: {}", truncate_path(file_label))).size(12.0));
-        
+
         ui.horizontal(|ui| {
             ui.label(format!("Speed: {:.2} MB/s", speed_mbs));
             ui.separator();
             if let Some(sec) = eta_sec {
                 if sec >= 60.0 {
-                    ui.label(format!("Time Remaining: {:.0}m {:.0}s", sec / 60.0, sec % 60.0));
+                    ui.label(format!(
+                        "Time Remaining: {:.0}m {:.0}s",
+                        sec / 60.0,
+                        sec % 60.0
+                    ));
                 } else {
                     ui.label(format!("Time Remaining: {:.0}s", sec));
                 }
@@ -232,7 +254,11 @@ fn render_running_view(
                 ui.label("Time Remaining: Estimating...");
             }
             ui.separator();
-            ui.label(format!("{}/{}", format_size(bytes_processed), format_size(bytes_total)));
+            ui.label(format!(
+                "{}/{}",
+                format_size(bytes_processed),
+                format_size(bytes_total)
+            ));
         });
 
         ui.add_space(20.0);
@@ -240,7 +266,11 @@ fn render_running_view(
         // --- LIVE THREAD VISUALIZER PANEL ---
         ui.group(|ui| {
             ui.vertical(|ui| {
-                ui.label(RichText::new("Thread Activity & Pipelines").strong().size(13.0));
+                ui.label(
+                    RichText::new("Thread Activity & Pipelines")
+                        .strong()
+                        .size(13.0),
+                );
                 ui.add_space(8.0);
 
                 // Lookahead Buffer level (fluctuating naturally based on time)
@@ -254,7 +284,10 @@ fn render_running_view(
                 let (buf_color, buf_name) = if buffer_percent > 50.0 {
                     (Color32::from_rgb(50, 180, 50), "Lookahead Buffer (Stable)")
                 } else if buffer_percent >= 25.0 {
-                    (Color32::from_rgb(220, 180, 50), "Lookahead Buffer (Throttling)")
+                    (
+                        Color32::from_rgb(220, 180, 50),
+                        "Lookahead Buffer (Throttling)",
+                    )
                 } else {
                     (Color32::from_rgb(220, 50, 50), "Lookahead Buffer (Starved)")
                 };
@@ -267,8 +300,12 @@ fn render_running_view(
                 });
 
                 // Custom lookahead bar
-                let (buf_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 8.0), egui::Sense::hover());
-                ui.painter().rect_filled(buf_rect, 4.0, ui.style().visuals.extreme_bg_color);
+                let (buf_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 8.0),
+                    egui::Sense::hover(),
+                );
+                ui.painter()
+                    .rect_filled(buf_rect, 4.0, ui.style().visuals.extreme_bg_color);
                 if buffer_percent > 0.0 {
                     let mut fill_rect = buf_rect;
                     fill_rect.set_width(buf_rect.width() * (buffer_percent / 100.0));
@@ -305,8 +342,18 @@ fn render_running_view(
                     1.0 + (factor * 1.84)
                 } else {
                     // decompression doesn't have ratio progress, display static original / compressed ratio
-                    let orig = app.extract_view.archive_info.as_ref().map(|i| i.original_size).unwrap_or(0);
-                    let comp = app.extract_view.archive_info.as_ref().map(|i| i.compressed_size).unwrap_or(1);
+                    let orig = app
+                        .extract_view
+                        .archive_info
+                        .as_ref()
+                        .map(|i| i.original_size)
+                        .unwrap_or(0);
+                    let comp = app
+                        .extract_view
+                        .archive_info
+                        .as_ref()
+                        .map(|i| i.compressed_size)
+                        .unwrap_or(1);
                     if orig > 0 {
                         orig as f32 / comp as f32
                     } else {
@@ -321,10 +368,17 @@ fn render_running_view(
 
                 // Active Threads
                 let thread_override = app.settings.thread_count_override.unwrap_or(0);
-                let thread_count = if thread_override > 0 { thread_override } else { 6 };
+                let thread_count = if thread_override > 0 {
+                    thread_override
+                } else {
+                    6
+                };
                 ui.horizontal(|ui| {
                     ui.label("Active Threads:");
-                    ui.colored_label(Color32::from_rgb(50, 180, 50), format!("{} active pipeline threads", thread_count));
+                    ui.colored_label(
+                        Color32::from_rgb(50, 180, 50),
+                        format!("{} active pipeline threads", thread_count),
+                    );
                 });
             });
         });
@@ -360,7 +414,11 @@ fn render_complete_view(
     let mut action = None;
     ui.vertical_centered(|ui| {
         ui.add_space(20.0);
-        ui.heading(RichText::new(title).color(Color32::from_rgb(50, 180, 50)).strong());
+        ui.heading(
+            RichText::new(title)
+                .color(Color32::from_rgb(50, 180, 50))
+                .strong(),
+        );
         ui.add_space(15.0);
 
         // Summary details
@@ -368,17 +426,28 @@ fn render_complete_view(
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.label("Time Elapsed:");
-                    ui.label(RichText::new(format!("{:.2} seconds", elapsed_ms as f32 / 1000.0)).strong());
+                    ui.label(
+                        RichText::new(format!("{:.2} seconds", elapsed_ms as f32 / 1000.0))
+                            .strong(),
+                    );
                 });
                 ui.horizontal(|ui| {
-                    ui.label(if is_compress { "Files Processed:" } else { "Files Extracted:" });
+                    ui.label(if is_compress {
+                        "Files Processed:"
+                    } else {
+                        "Files Extracted:"
+                    });
                     ui.label(RichText::new(files.to_string()).strong());
                 });
                 ui.horizontal(|ui| {
-                    ui.label(if is_compress { "Original Size:" } else { "Bytes Restored:" });
+                    ui.label(if is_compress {
+                        "Original Size:"
+                    } else {
+                        "Bytes Restored:"
+                    });
                     ui.label(RichText::new(format_size(orig_size)).strong());
                 });
-                
+
                 if let Some(c_size) = comp_size {
                     ui.horizontal(|ui| {
                         ui.label("Compressed Archive Size:");
@@ -388,7 +457,10 @@ fn render_complete_view(
                 if let Some(r) = ratio {
                     ui.horizontal(|ui| {
                         ui.label("Compression Ratio:");
-                        ui.label(RichText::new(format!("{:.2}x ({:.1}% saved)", r, (1.0 - r) * 100.0)).strong());
+                        ui.label(
+                            RichText::new(format!("{:.2}x ({:.1}% saved)", r, (1.0 - r) * 100.0))
+                                .strong(),
+                        );
                     });
                 }
             });
@@ -416,10 +488,18 @@ fn render_complete_view(
             }
 
             // Perform another operation
-            let another_label = if is_compress { "📦 Compress Another" } else { "🔓 Extract Another" };
+            let another_label = if is_compress {
+                "📦 Compress Another"
+            } else {
+                "🔓 Extract Another"
+            };
             if ui.button(another_label).clicked() {
                 action = Some((
-                    if is_compress { AppView::Compress } else { AppView::Extract },
+                    if is_compress {
+                        AppView::Compress
+                    } else {
+                        AppView::Extract
+                    },
                     CompressionState::Idle,
                 ));
             }
@@ -446,19 +526,23 @@ fn truncate_path(path: &str) -> String {
 /// Dynamic cross-platform directory browser helper.
 fn open_directory(path: &Path) {
     let path_str = path.to_string_lossy().to_string();
-    
+
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("explorer").arg(&path_str).spawn();
+        let _ = std::process::Command::new("explorer")
+            .arg(&path_str)
+            .spawn();
     }
-    
+
     #[cfg(target_os = "macos")]
     {
         let _ = std::process::Command::new("open").arg(&path_str).spawn();
     }
-    
+
     #[cfg(target_os = "linux")]
     {
-        let _ = std::process::Command::new("xdg-open").arg(&path_str).spawn();
+        let _ = std::process::Command::new("xdg-open")
+            .arg(&path_str)
+            .spawn();
     }
 }

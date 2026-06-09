@@ -3,8 +3,8 @@
 //! Integrates rfd (Rust File Dialogs) for cross-platform native selection
 //! of input/output files and directories.
 
-use std::path::PathBuf;
 use egui::Ui;
+use std::path::PathBuf;
 
 /// Component managing native file or folder selection dialogs and path display.
 pub struct FilePicker {
@@ -45,27 +45,27 @@ impl FilePicker {
     pub fn show(&mut self, ui: &mut Ui, label: &str) -> Option<PathBuf> {
         ui.horizontal(|ui| {
             ui.label(label);
-            
+
             let mut path_str = match &self.path {
                 Some(p) => p.to_string_lossy().to_string(),
                 None => "No path selected...".to_string(),
             };
-            
+
             // Read-only text area showing path
             ui.add(
                 egui::TextEdit::singleline(&mut path_str)
                     .interactive(false)
                     .desired_width(320.0),
             );
-            
+
             if ui.button("Browse...").clicked() {
                 let mut dialog = rfd::FileDialog::new();
-                
+
                 if let Some(ref exts) = self.allowed_extensions {
                     let ref_exts: Vec<&str> = exts.iter().map(|s| s.as_str()).collect();
                     dialog = dialog.add_filter("FLUX Archive Files", &ref_exts);
                 }
-                
+
                 let picked_path = if self.pick_folders {
                     dialog.pick_folder()
                 } else if self.is_save {

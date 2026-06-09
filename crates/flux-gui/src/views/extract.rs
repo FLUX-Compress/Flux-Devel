@@ -3,18 +3,18 @@
 //! Handles archive file input, reads archive headers to display info previews,
 //! prompts for passwords if encrypted, and spawns decompression background threads.
 
+use egui::{Button, RichText, Ui};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use egui::{Button, RichText, Ui};
 
-use flux::Archive;
-use crate::app::FluxApp;
 use crate::app::AppView;
+use crate::app::FluxApp;
 use crate::components::file_picker::FilePicker;
 use crate::components::password_field::PasswordField;
 use crate::state::CompressionState;
 use crate::views::compress::format_size;
+use flux::Archive;
 
 /// Basic metadata extracted from the archive header/index.
 #[derive(Debug, Clone)]
@@ -66,7 +66,9 @@ impl ExtractView {
         let current_path = self.picker.path.clone();
         let current_pass = self.password_field.password.clone();
 
-        if current_path != self.last_archive_path || current_pass != self.last_password.as_deref().unwrap_or_default() {
+        if current_path != self.last_archive_path
+            || current_pass != self.last_password.as_deref().unwrap_or_default()
+        {
             self.last_archive_path = current_path.clone();
             self.last_password = Some(current_pass.clone());
 
@@ -95,7 +97,8 @@ impl ExtractView {
                     Err(e) => {
                         self.archive_info = None;
                         if self.is_encrypted && current_pass.is_empty() {
-                            self.metadata_error = Some("Password required to view metadata".to_string());
+                            self.metadata_error =
+                                Some("Password required to view metadata".to_string());
                         } else {
                             match e {
                                 flux::FluxError::WrongPassword => {
@@ -172,7 +175,10 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                         ui.horizontal(|ui| {
                             ui.label("Encrypted:");
                             if info.is_encrypted {
-                                ui.colored_label(egui::Color32::from_rgb(220, 180, 50), "Yes 🔒 (AES-256-GCM)");
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(220, 180, 50),
+                                    "Yes 🔒 (AES-256-GCM)",
+                                );
                             } else {
                                 ui.colored_label(egui::Color32::from_rgb(50, 180, 50), "No 🔓");
                             }
@@ -220,7 +226,8 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
 
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let extract_btn = Button::new(RichText::new("🔓 Start Extraction").size(15.0).strong());
+                let extract_btn =
+                    Button::new(RichText::new("🔓 Start Extraction").size(15.0).strong());
                 if ui.add_enabled(can_start, extract_btn).clicked() {
                     let in_path = view.picker.path.clone().unwrap();
                     let out_path = view.output_picker.path.clone().unwrap();
@@ -233,7 +240,11 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                     // Transition to Progress view
                     app.current_view = AppView::Progress;
 
-                    let bytes_total = view.archive_info.as_ref().map(|i| i.original_size).unwrap_or(0);
+                    let bytes_total = view
+                        .archive_info
+                        .as_ref()
+                        .map(|i| i.original_size)
+                        .unwrap_or(0);
                     // Start background thread extraction
                     start_extraction(
                         &mut app.compression_state,
@@ -289,5 +300,9 @@ fn start_extraction(
         builder.run()
     });
 
-    *state = CompressionState::RunningExtract { progress, handle, start_time: std::time::Instant::now() };
+    *state = CompressionState::RunningExtract {
+        progress,
+        handle,
+        start_time: std::time::Instant::now(),
+    };
 }

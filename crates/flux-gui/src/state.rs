@@ -3,11 +3,11 @@
 //! Handles background thread status monitoring and loading/saving
 //! settings dynamically from the OS-specific application directory.
 
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use serde::{Deserialize, Serialize};
 
 use flux::{Compression, CompressionStats, DecompressionStats, FluxError, Progress};
 
@@ -109,7 +109,9 @@ impl AppSettings {
         if let Some(path) = Self::config_file_path() {
             if path.exists() {
                 if let Ok(file_content) = std::fs::read_to_string(path) {
-                    if let Ok(settings_wrapper) = serde_json::from_str::<AppSettingsRaw>(&file_content) {
+                    if let Ok(settings_wrapper) =
+                        serde_json::from_str::<AppSettingsRaw>(&file_content)
+                    {
                         return settings_wrapper.into_settings();
                     }
                 }

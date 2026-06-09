@@ -3,11 +3,11 @@
 //! "The Babysitter" thread runs in the background to ensure that the compression workers
 //! are never starved of data by maintaining the circular buffer in an always-full state.
 
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use crossbeam::channel::{Sender, Receiver};
 use super::circular::CircularBuffer;
 use crate::threads::signals::{BufferSignal, CompressionSignal};
+use crossbeam::channel::{Receiver, Sender};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// Coordinates streaming data from a source reader into the circular buffer.
 ///
@@ -130,11 +130,10 @@ impl BufferManager {
     /// Returns the number of bytes read and committed, or an I/O Error.
     pub fn fill_tail(&self) -> Result<usize, std::io::Error> {
         let mut source_guard = self.source.lock().unwrap();
-        
+
         // Read up to 64KB blocks to optimize disk sectors throughput.
-        self.buffer.write_with(65536, |slice| {
-            source_guard.read(slice)
-        })
+        self.buffer
+            .write_with(65536, |slice| source_guard.read(slice))
     }
 
     /// Handles EOF transition, marking flags and sending notifications.

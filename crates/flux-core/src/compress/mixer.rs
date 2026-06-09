@@ -27,9 +27,9 @@
 //! the mixer to adapt to the unique local statistics of each individual block independently,
 //! which is crucial for heterogeneous datasets.
 
-use std::collections::VecDeque;
 use crate::compress::ppm::PpmEvent;
 use crate::compress::rans::ProbabilityTable;
+use std::collections::VecDeque;
 
 /// Represents the weight and error tracking for an individual model.
 #[derive(Clone, Debug, PartialEq)]
@@ -64,7 +64,8 @@ impl MixerWeight {
         };
 
         // Update exponential moving average of the error
-        self.recent_error = (1.0 - self.learning_rate) * self.recent_error + self.learning_rate * error;
+        self.recent_error =
+            (1.0 - self.learning_rate) * self.recent_error + self.learning_rate * error;
 
         // Perform gradient update
         if actual_symbol_was_correct {
@@ -140,14 +141,19 @@ impl ContextMixer {
 
         // 2. Normalize distribution
         let total_sum: f32 = raw_blended.iter().sum();
-        let normalizer = if total_sum > 0.0 { 1.0 / total_sum } else { 1.0 };
+        let normalizer = if total_sum > 0.0 {
+            1.0 / total_sum
+        } else {
+            1.0
+        };
         let mut blended = Vec::with_capacity(256);
         for (s, &val) in raw_blended.iter().enumerate() {
             blended.push((s as u8, val * normalizer));
         }
 
         // 3. Determine if models predicted correctly (predicted highest probability)
-        let ppm_max_sym = ppm_probs.iter()
+        let ppm_max_sym = ppm_probs
+            .iter()
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|&(sym, _)| sym);
         let ppm_was_correct = ppm_max_sym == Some(symbol);
@@ -156,10 +162,12 @@ impl ContextMixer {
 
         // 4. Update model weights
         self.ppm_weight.update(ppm_map[target_idx], ppm_was_correct);
-        self.secondary_weight.update(secondary_prob, sec_was_correct);
+        self.secondary_weight
+            .update(secondary_prob, sec_was_correct);
 
         // 5. Update history
-        self.blend_history.push_back((ppm_map[target_idx], secondary_prob));
+        self.blend_history
+            .push_back((ppm_map[target_idx], secondary_prob));
         if self.blend_history.len() > 100 {
             self.blend_history.pop_front();
         }
@@ -176,9 +184,14 @@ impl ContextMixer {
         symbol: u8,
     ) -> ProbabilityTable {
         // Retrieve symbol probability from PPM events
-        let ppm_prob = ppm_events.iter()
+        let ppm_prob = ppm_events
+            .iter()
             .find_map(|event| match event {
-                PpmEvent::Symbol { symbol: sym, probability, .. } if *sym == symbol => Some(*probability),
+                PpmEvent::Symbol {
+                    symbol: sym,
+                    probability,
+                    ..
+                } if *sym == symbol => Some(*probability),
                 _ => None,
             })
             .unwrap_or(1.0 / 256.0);
@@ -227,7 +240,7 @@ mod tests {
     #[test]
     fn test_mixer_weight_increases_for_good_prediction() {
         let mut weight = MixerWeight::new(0.5, 0.1);
-        
+
         // Good prediction: correct and high probability
         weight.update(0.8, true);
         assert!(weight.weight > 0.5);
@@ -236,7 +249,7 @@ mod tests {
     #[test]
     fn test_mixer_weight_decreases_for_bad_prediction() {
         let mut weight = MixerWeight::new(0.5, 0.1);
-        
+
         // Bad prediction: incorrect with low probability
         weight.update(0.1, false);
         assert!(weight.weight < 0.5);
@@ -275,7 +288,7 @@ mod tests {
     #[test]
     fn test_mixer_adapts_over_sequence() {
         let mut mixer = ContextMixer::new();
-        
+
         // Simulating a sequence where PPM performs extremely well (high probability, correct)
         // and secondary performs poorly (low probability, incorrect)
         let mut ppm_probs = vec![(0u8, 0.9)];

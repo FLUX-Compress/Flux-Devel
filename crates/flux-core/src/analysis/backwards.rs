@@ -4,12 +4,12 @@
 //! By monitoring history, it dynamically throttles computation in the forward analyzer
 //! or triggers immediate recalibration when drift occurs.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
-use std::sync::Mutex;
-use crate::buffer::window::SlidingWindow;
-use crate::threads::signals::{StrideSignal, CompressionSignal, ContentType};
 use crate::archive::format::BlockBoundaryHint;
+use crate::buffer::window::SlidingWindow;
+use crate::threads::signals::{CompressionSignal, ContentType, StrideSignal};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::Arc;
+use std::sync::Mutex;
 
 /// Number of consecutive stable checks before signaling Cold mode.
 ///
@@ -107,7 +107,7 @@ impl BackwardsAnalyzer {
                 let mut ranges = Vec::new();
                 let mut current_start = history[0].0;
                 let mut current_stride = history[0].1;
-                
+
                 for i in 1..history.len() {
                     let (pos, stride) = history[i];
                     if stride != current_stride {
@@ -124,7 +124,11 @@ impl BackwardsAnalyzer {
                         } else {
                             ContentType::Binary
                         };
-                        let stride_before = if current_stride > 0 { Some(current_stride) } else { None };
+                        let stride_before = if current_stride > 0 {
+                            Some(current_stride)
+                        } else {
+                            None
+                        };
                         let stride_after = if stride > 0 { Some(stride) } else { None };
 
                         boundary_hints.push(BlockBoundaryHint {
@@ -142,7 +146,7 @@ impl BackwardsAnalyzer {
                 // Push the final range up to the total validated bytes
                 let total_bytes = self.bytes_validated_total.load(Ordering::Acquire);
                 ranges.push((current_start, total_bytes, current_stride));
-                
+
                 let _ = self.signal_tx.send(StrideSignal::VariedPatterns(ranges));
             }
         }
@@ -168,7 +172,8 @@ impl BackwardsAnalyzer {
             }
 
             // Detect EOF: no bytes ahead and EOF flag is raised in circular buffer
-            let is_eof = self.window.buffer.eof.load(Ordering::Acquire) && self.window.bytes_ahead() == 0;
+            let is_eof =
+                self.window.buffer.eof.load(Ordering::Acquire) && self.window.bytes_ahead() == 0;
             if is_eof {
                 if !self.eof_behavior_complete.load(Ordering::Acquire) {
                     self.handle_eof_analysis();
@@ -177,12 +182,13 @@ impl BackwardsAnalyzer {
             }
 
             let current_start = self.window.window_start.load(Ordering::Acquire) as u64;
-            let physical_bytes_behind = std::cmp::min(current_start, self.window.buffer.capacity as u64);
+            let physical_bytes_behind =
+                std::cmp::min(current_start, self.window.buffer.capacity as u64);
 
             // Validate in chunks of 1024 bytes once they have been advanced by compression
             if current_start.saturating_sub(last_checked_pos) >= 1024 {
                 let mut work_done = false;
-                
+
                 while current_start.saturating_sub(last_checked_pos) >= 1024 {
                     let offset = (current_start - last_checked_pos) as usize;
                     if offset > physical_bytes_behind as usize {
@@ -194,7 +200,8 @@ impl BackwardsAnalyzer {
                     // Keep last_confirmed_stride in sync with window hints
                     let active_stride = self.window.get_stride_hint();
                     if active_stride > 0 {
-                        self.last_confirmed_stride.store(active_stride, Ordering::Release);
+                        self.last_confirmed_stride
+                            .store(active_stride, Ordering::Release);
                     }
 
                     let stride = self.last_confirmed_stride.load(Ordering::Acquire);
@@ -204,12 +211,14 @@ impl BackwardsAnalyzer {
                         let data = self.window.peek_backwards(offset, 1024);
                         if data.len() >= 1024 {
                             let corr = self.validate_stride(data, stride);
-                            self.bytes_validated_total.fetch_add(1024, Ordering::Release);
-                            
+                            self.bytes_validated_total
+                                .fetch_add(1024, Ordering::Release);
+
                             let threshold = crate::analysis::stride::STRIDE_CONFIRMATION_THRESHOLD;
                             if corr >= (threshold - self.drift_threshold) {
                                 self.stride_history.lock().unwrap().push((pos, stride));
-                                let streak = self.stability_streak.fetch_add(1, Ordering::SeqCst) + 1;
+                                let streak =
+                                    self.stability_streak.fetch_add(1, Ordering::SeqCst) + 1;
                                 if streak >= STABILITY_STREAK_FOR_COLD {
                                     let _ = self.signal_tx.send(StrideSignal::Stable(stride));
                                 }
@@ -223,7 +232,8 @@ impl BackwardsAnalyzer {
                         }
                     } else {
                         // Stride is 0/unknown, log as 0 to track the transition
-                        self.bytes_validated_total.fetch_add(1024, Ordering::Release);
+                        self.bytes_validated_total
+                            .fetch_add(1024, Ordering::Release);
                         self.stride_history.lock().unwrap().push((pos, 0));
                     }
                     last_checked_pos += 1024;
@@ -244,47 +254,48 @@ impl BackwardsAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::stride::{AnalysisMode, StrideDetector};
     use crate::buffer::circular::CircularBuffer;
     use crate::buffer::window::SlidingWindow;
-    use crate::analysis::stride::{AnalysisMode, StrideDetector};
 
     #[test]
     fn test_backwards_analyzer_live() {
         let buffer = Arc::new(CircularBuffer::new(16384));
         let window = Arc::new(SlidingWindow::new(buffer.clone(), 4096));
-        
+
         let (signal_tx, signal_rx) = crossbeam::channel::unbounded();
         let (hints_tx, hints_rx) = crossbeam::channel::unbounded();
         let (_shutdown_tx, shutdown_rx) = crossbeam::channel::unbounded();
-        
-        let mut validator = BackwardsAnalyzer::new(window.clone(), signal_tx, hints_tx, shutdown_rx);
-        
+
+        let mut validator =
+            BackwardsAnalyzer::new(window.clone(), signal_tx, hints_tx, shutdown_rx);
+
         // Set stride hint and confirmed stride
         window.set_stride_hint(4);
         validator.last_confirmed_stride.store(4, Ordering::Release);
-        
+
         // Start live validator thread
         let handle = std::thread::spawn(move || {
             validator.run();
             validator
         });
-        
+
         // Write repeating 4-byte pattern to buffer
         let mut pattern = Vec::new();
         for i in 0..1024 {
             pattern.push((i % 4) as u8);
         }
         buffer.write(&pattern);
-        
+
         // Slide forward so bytes are behind (to trigger validation)
         window.slide_forward(1024);
-        
+
         // Write 8 blocks of 1024 bytes to trigger Cold transition (STABILITY_STREAK_FOR_COLD = 8)
         for _ in 0..7 {
             buffer.write(&pattern);
             window.slide_forward(1024);
         }
-        
+
         // Now it has 8 checks, so it should send Stable(4)
         let mut found_stable = false;
         for _ in 0..100 {
@@ -296,7 +307,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(found_stable);
-        
+
         // Now, let's trigger drift by writing random/noisy data
         let mut noise = Vec::new();
         for i in 0..1024 {
@@ -304,7 +315,7 @@ mod tests {
         }
         buffer.write(&noise);
         window.slide_forward(1024);
-        
+
         // Validator should detect drift and send Drifted signal
         let mut found_drift = false;
         for _ in 0..100 {
@@ -315,14 +326,17 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(found_drift);
-        
+
         // Trigger EOF to run eof analysis and close Validator thread
         buffer.eof.store(true, Ordering::Release);
-        
+
         // Wait for validator thread to exit
         let validator = handle.join().unwrap();
-        
-        assert_eq!(validator.bytes_validated_total.load(Ordering::Acquire), 9216); // 9 blocks of 1024
+
+        assert_eq!(
+            validator.bytes_validated_total.load(Ordering::Acquire),
+            9216
+        ); // 9 blocks of 1024
 
         // Verify we got the EOF boundary hints
         let hints = hints_rx.try_recv().unwrap();
@@ -338,43 +352,38 @@ mod tests {
     fn test_mode_transitions_live() {
         let buffer = Arc::new(CircularBuffer::new(4096));
         let window = Arc::new(SlidingWindow::new(buffer.clone(), 2048));
-        
+
         let (mode_tx, _mode_rx) = crossbeam::channel::unbounded();
         let (stability_tx, stability_rx) = crossbeam::channel::unbounded();
         let (shutdown_tx, shutdown_rx) = crossbeam::channel::unbounded();
-        
-        let mut detector = StrideDetector::new(
-            window.clone(),
-            mode_tx,
-            stability_rx,
-            shutdown_rx,
-        );
-        
+
+        let mut detector = StrideDetector::new(window.clone(), mode_tx, stability_rx, shutdown_rx);
+
         assert_eq!(detector.mode, AnalysisMode::Hot);
-        
+
         let window_clone = window.clone();
         let handle = std::thread::spawn(move || {
             detector.run(window_clone);
             detector
         });
-        
+
         // Transition Hot -> Warm
         stability_tx.send(StrideSignal::Stable(4)).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        
+
         // Transition Warm -> Cold
         stability_tx.send(StrideSignal::Stable(4)).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        
+
         // Transition Cold -> Hot
         stability_tx.send(StrideSignal::Drifted).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        
+
         // Shut down the loop
         shutdown_tx.send(CompressionSignal::Shutdown).unwrap();
-        
+
         let detector = handle.join().unwrap();
-        
+
         // During the run, it transitioned:
         // Hot -> Warm -> Cold -> Hot -> Shutdown (final state)
         assert_eq!(detector.mode, AnalysisMode::Shutdown);

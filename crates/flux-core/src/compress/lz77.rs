@@ -4,8 +4,8 @@
 //! LZ77 finds repeated byte sequences and replaces them with (length, distance)
 //! back-references into a sliding window of historical data.
 
-use std::collections::VecDeque;
 use crate::transform::MediaFilterType;
+use std::collections::VecDeque;
 
 /// Matches shorter than 4 bytes cost more to encode as a (length, distance) triplet
 /// than they save, so 4 is the optimal minimum match length.
@@ -71,7 +71,19 @@ pub struct Lz77Match {
 }
 
 const LOG2_FRACTION_TABLE: [u8; 256] = [
-    0, 1, 3, 4, 6, 7, 9, 10, 11, 13, 14, 16, 17, 18, 20, 21, 22, 24, 25, 26, 28, 29, 30, 32, 33, 34, 36, 37, 38, 40, 41, 42, 44, 45, 46, 47, 49, 50, 51, 52, 54, 55, 56, 57, 59, 60, 61, 62, 63, 65, 66, 67, 68, 69, 71, 72, 73, 74, 75, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90, 92, 93, 94, 95, 96, 97, 98, 99, 100, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 178, 179, 180, 181, 182, 183, 184, 185, 185, 186, 187, 188, 189, 190, 191, 192, 192, 193, 194, 195, 196, 197, 198, 198, 199, 200, 201, 202, 203, 203, 204, 205, 206, 207, 208, 208, 209, 210, 211, 212, 212, 213, 214, 215, 216, 216, 217, 218, 219, 220, 220, 221, 222, 223, 224, 224, 225, 226, 227, 228, 228, 229, 230, 231, 231, 232, 233, 234, 234, 235, 236, 237, 238, 238, 239, 240, 241, 241, 242, 243, 244, 244, 245, 246, 247, 247, 248, 249, 249, 250, 251, 252, 252, 253, 254, 255, 255
+    0, 1, 3, 4, 6, 7, 9, 10, 11, 13, 14, 16, 17, 18, 20, 21, 22, 24, 25, 26, 28, 29, 30, 32, 33,
+    34, 36, 37, 38, 40, 41, 42, 44, 45, 46, 47, 49, 50, 51, 52, 54, 55, 56, 57, 59, 60, 61, 62, 63,
+    65, 66, 67, 68, 69, 71, 72, 73, 74, 75, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90, 92,
+    93, 94, 95, 96, 97, 98, 99, 100, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113,
+    114, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133,
+    134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152,
+    153, 154, 155, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 169,
+    170, 171, 172, 173, 174, 175, 176, 177, 178, 178, 179, 180, 181, 182, 183, 184, 185, 185, 186,
+    187, 188, 189, 190, 191, 192, 192, 193, 194, 195, 196, 197, 198, 198, 199, 200, 201, 202, 203,
+    203, 204, 205, 206, 207, 208, 208, 209, 210, 211, 212, 212, 213, 214, 215, 216, 216, 217, 218,
+    219, 220, 220, 221, 222, 223, 224, 224, 225, 226, 227, 228, 228, 229, 230, 231, 231, 232, 233,
+    234, 234, 235, 236, 237, 238, 238, 239, 240, 241, 241, 242, 243, 244, 244, 245, 246, 247, 247,
+    248, 249, 249, 250, 251, 252, 252, 253, 254, 255, 255,
 ];
 
 /// Computes log2(val) in 24.8 fixed-point representation.
@@ -81,11 +93,7 @@ pub fn log2_fixed(val: u32) -> u32 {
     }
     let lz = val.leading_zeros();
     let integer_part = 31 - lz;
-    let shifted = if lz < 31 {
-        val.wrapping_shl(lz + 1)
-    } else {
-        0
-    };
+    let shifted = if lz < 31 { val.wrapping_shl(lz + 1) } else { 0 };
     let idx = (shifted >> 24) as usize;
     let fraction = LOG2_FRACTION_TABLE[idx] as u32;
     (integer_part << 8) + fraction
@@ -94,7 +102,7 @@ pub fn log2_fixed(val: u32) -> u32 {
 /// Price model estimating costs in 24.8 fixed-point bits.
 #[derive(Debug, Clone)]
 pub struct PriceModel {
-    pub flag_prices: [u32; 3],          // 0: Literal, 1: Match, 2: RepMatch
+    pub flag_prices: [u32; 3], // 0: Literal, 1: Match, 2: RepMatch
     pub literal_prices: [u32; 256],
     pub length_prices: [u32; 256],
     pub slot_prices: [u32; 56],
@@ -119,7 +127,11 @@ impl PriceModel {
                 }
                 Lz77Token::Match { distance, length } => {
                     flag_freqs[1] += 1;
-                    let min_match = if pos < min_match_map.len() { min_match_map[pos] as u16 } else { 4u16 };
+                    let min_match = if pos < min_match_map.len() {
+                        min_match_map[pos] as u16
+                    } else {
+                        4u16
+                    };
                     let len_val = (length.saturating_sub(min_match)).min(255) as u8;
                     length_freqs[len_val as usize] += 1;
 
@@ -129,7 +141,11 @@ impl PriceModel {
                 }
                 Lz77Token::RepMatch { index, length } => {
                     flag_freqs[2] += 1;
-                    let min_match = if pos < min_match_map.len() { min_match_map[pos] as u16 } else { 4u16 };
+                    let min_match = if pos < min_match_map.len() {
+                        min_match_map[pos] as u16
+                    } else {
+                        4u16
+                    };
                     let len_val = (length.saturating_sub(min_match)).min(255) as u8;
                     length_freqs[len_val as usize] += 1;
 
@@ -313,7 +329,11 @@ impl Lz77Encoder {
         self.encode(data)
     }
 
-    pub fn encode_with_media_filter(&mut self, data: &[u8], media_filter: &MediaFilterType) -> Vec<Lz77Token> {
+    pub fn encode_with_media_filter(
+        &mut self,
+        data: &[u8],
+        media_filter: &MediaFilterType,
+    ) -> Vec<Lz77Token> {
         let map = build_min_match_map(media_filter, data.len());
         self.encode_with_map(data, &map)
     }
@@ -329,7 +349,7 @@ impl Lz77Encoder {
     /// Finds the best match (either normal match or repcode match) at the given position.
     pub fn find_best_match_with_repcodes(&self, data: &[u8], pos: usize) -> Option<Lz77Token> {
         let chain_match = self.find_best_match(data, pos);
-        
+
         let min_match = self.min_match_at(pos);
         let mut best_rep_idx = None;
         let mut best_rep_len = 0;
@@ -341,38 +361,66 @@ impl Lz77Encoder {
                 best_rep_idx = Some(i as u8);
             }
         }
-        
+
         match (chain_match, best_rep_idx) {
             (Some((c_dist, c_len)), Some(r_idx)) => {
                 if best_rep_len >= c_len {
-                    Some(Lz77Token::RepMatch { index: r_idx, length: best_rep_len as u16 })
+                    Some(Lz77Token::RepMatch {
+                        index: r_idx,
+                        length: best_rep_len as u16,
+                    })
                 } else {
                     // Check if c_dist is actually one of the rep offsets
                     if c_dist == self.rep_offsets[0] as usize {
-                        Some(Lz77Token::RepMatch { index: 0, length: c_len as u16 })
+                        Some(Lz77Token::RepMatch {
+                            index: 0,
+                            length: c_len as u16,
+                        })
                     } else if c_dist == self.rep_offsets[1] as usize {
-                        Some(Lz77Token::RepMatch { index: 1, length: c_len as u16 })
+                        Some(Lz77Token::RepMatch {
+                            index: 1,
+                            length: c_len as u16,
+                        })
                     } else if c_dist == self.rep_offsets[2] as usize {
-                        Some(Lz77Token::RepMatch { index: 2, length: c_len as u16 })
+                        Some(Lz77Token::RepMatch {
+                            index: 2,
+                            length: c_len as u16,
+                        })
                     } else {
-                        Some(Lz77Token::Match { distance: c_dist as u32, length: c_len as u16 })
+                        Some(Lz77Token::Match {
+                            distance: c_dist as u32,
+                            length: c_len as u16,
+                        })
                     }
                 }
             }
             (Some((c_dist, c_len)), None) => {
                 if c_dist == self.rep_offsets[0] as usize {
-                    Some(Lz77Token::RepMatch { index: 0, length: c_len as u16 })
+                    Some(Lz77Token::RepMatch {
+                        index: 0,
+                        length: c_len as u16,
+                    })
                 } else if c_dist == self.rep_offsets[1] as usize {
-                    Some(Lz77Token::RepMatch { index: 1, length: c_len as u16 })
+                    Some(Lz77Token::RepMatch {
+                        index: 1,
+                        length: c_len as u16,
+                    })
                 } else if c_dist == self.rep_offsets[2] as usize {
-                    Some(Lz77Token::RepMatch { index: 2, length: c_len as u16 })
+                    Some(Lz77Token::RepMatch {
+                        index: 2,
+                        length: c_len as u16,
+                    })
                 } else {
-                    Some(Lz77Token::Match { distance: c_dist as u32, length: c_len as u16 })
+                    Some(Lz77Token::Match {
+                        distance: c_dist as u32,
+                        length: c_len as u16,
+                    })
                 }
             }
-            (None, Some(r_idx)) => {
-                Some(Lz77Token::RepMatch { index: r_idx, length: best_rep_len as u16 })
-            }
+            (None, Some(r_idx)) => Some(Lz77Token::RepMatch {
+                index: r_idx,
+                length: best_rep_len as u16,
+            }),
             (None, None) => None,
         }
     }
@@ -392,7 +440,7 @@ impl Lz77Encoder {
         self.window.clear();
         self.hash_table.fill(u32::MAX);
         self.rep_offsets = [1, 4, 8];
-        
+
         if self.hash_chains.len() < data.len() {
             self.hash_chains.resize(data.len(), u32::MAX);
         }
@@ -523,7 +571,7 @@ impl Lz77Encoder {
         self.window.clear();
         self.hash_table.fill(u32::MAX);
         self.rep_offsets = [1, 4, 8];
-        
+
         self.hash_chains[..data.len()].fill(u32::MAX);
         self.bt_left[..data.len()].fill(u32::MAX);
         self.bt_right[..data.len()].fill(u32::MAX);
@@ -575,10 +623,15 @@ impl Lz77Encoder {
 
                 let curr_price = curr_state.price;
                 let curr_reps = curr_state.rep_offsets;
-                let min_match = if pos < min_match_map.len() { min_match_map[pos] as usize } else { 4usize };
+                let min_match = if pos < min_match_map.len() {
+                    min_match_map[pos] as usize
+                } else {
+                    4usize
+                };
 
                 // 1. Literal transition
-                let lit_cost = price_model.flag_prices[0] + price_model.literal_prices[data[pos] as usize];
+                let lit_cost =
+                    price_model.flag_prices[0] + price_model.literal_prices[data[pos] as usize];
                 let lit_price = curr_price.saturating_add(lit_cost);
                 if lit_price < opt[i + 1].price {
                     opt[i + 1] = OptState {
@@ -615,7 +668,7 @@ impl Lz77Encoder {
 
                     for len in min_match..=max_len {
                         let len_val = (len.saturating_sub(min_match)).min(255);
-                        
+
                         // Check if this distance is in the current repcode cache
                         let mut rep_idx = None;
                         for (r, &offset) in curr_reps.iter().enumerate() {
@@ -626,7 +679,9 @@ impl Lz77Encoder {
                         }
 
                         let (cost, next_reps) = if let Some(idx) = rep_idx {
-                            let c = price_model.flag_prices[2] + price_model.length_prices[len_val] + price_model.rep_prices[idx];
+                            let c = price_model.flag_prices[2]
+                                + price_model.length_prices[len_val]
+                                + price_model.rep_prices[idx];
                             let mut nr = curr_reps;
                             if idx == 1 {
                                 nr.swap(0, 1);
@@ -640,7 +695,10 @@ impl Lz77Encoder {
                             (c, nr)
                         } else {
                             let (slot, _, extra_bits) = distance_to_slot(dist);
-                            let c = price_model.flag_prices[1] + price_model.length_prices[len_val] + price_model.slot_prices[slot as usize] + extra_bits as u32 * 256;
+                            let c = price_model.flag_prices[1]
+                                + price_model.length_prices[len_val]
+                                + price_model.slot_prices[slot as usize]
+                                + extra_bits as u32 * 256;
                             let nr = [dist, curr_reps[0], curr_reps[1]];
                             (c, nr)
                         };
@@ -650,8 +708,14 @@ impl Lz77Encoder {
                             opt[i + len] = OptState {
                                 price: cand_price,
                                 back_token: Some(match rep_idx {
-                                    Some(idx) => Lz77Token::RepMatch { index: idx as u8, length: len as u16 },
-                                    None => Lz77Token::Match { distance: dist, length: len as u16 },
+                                    Some(idx) => Lz77Token::RepMatch {
+                                        index: idx as u8,
+                                        length: len as u16,
+                                    },
+                                    None => Lz77Token::Match {
+                                        distance: dist,
+                                        length: len as u16,
+                                    },
                                 }),
                                 back_len: len as u16,
                                 rep_offsets: next_reps,
@@ -662,8 +726,14 @@ impl Lz77Encoder {
                         if len >= self.good_match && len > best_skip_len {
                             best_skip_len = len;
                             best_skip_token = Some(match rep_idx {
-                                Some(idx) => Lz77Token::RepMatch { index: idx as u8, length: len as u16 },
-                                None => Lz77Token::Match { distance: dist, length: len as u16 },
+                                Some(idx) => Lz77Token::RepMatch {
+                                    index: idx as u8,
+                                    length: len as u16,
+                                },
+                                None => Lz77Token::Match {
+                                    distance: dist,
+                                    length: len as u16,
+                                },
                             });
                             best_skip_cost = cand_price;
                             best_skip_reps = next_reps;
@@ -675,8 +745,10 @@ impl Lz77Encoder {
                 for &(idx, len) in &rep_matches {
                     for l in min_match..=len {
                         let len_val = (l.saturating_sub(min_match)).min(255);
-                        let cost = price_model.flag_prices[2] + price_model.length_prices[len_val] + price_model.rep_prices[idx];
-                        
+                        let cost = price_model.flag_prices[2]
+                            + price_model.length_prices[len_val]
+                            + price_model.rep_prices[idx];
+
                         let mut nr = curr_reps;
                         if idx == 1 {
                             nr.swap(0, 1);
@@ -692,7 +764,10 @@ impl Lz77Encoder {
                         if cand_price < opt[i + l].price {
                             opt[i + l] = OptState {
                                 price: cand_price,
-                                back_token: Some(Lz77Token::RepMatch { index: idx as u8, length: l as u16 }),
+                                back_token: Some(Lz77Token::RepMatch {
+                                    index: idx as u8,
+                                    length: l as u16,
+                                }),
                                 back_len: l as u16,
                                 rep_offsets: nr,
                             };
@@ -701,7 +776,10 @@ impl Lz77Encoder {
                         // Check early-abort/skip condition
                         if l >= self.good_match && l > best_skip_len {
                             best_skip_len = l;
-                            best_skip_token = Some(Lz77Token::RepMatch { index: idx as u8, length: l as u16 });
+                            best_skip_token = Some(Lz77Token::RepMatch {
+                                index: idx as u8,
+                                length: l as u16,
+                            });
                             best_skip_cost = cand_price;
                             best_skip_reps = nr;
                         }
@@ -969,7 +1047,7 @@ impl Lz77Encoder {
 
         let mut left_parent = pos;
         let mut left_is_left = true;
-        
+
         let mut right_parent = pos;
         let mut right_is_left = false;
 
@@ -1093,9 +1171,8 @@ impl Lz77Encoder {
         if pos + 2 >= data.len() {
             return 0;
         }
-        let val = ((data[pos] as u32) << 16)
-            | ((data[pos + 1] as u32) << 8)
-            | (data[pos + 2] as u32);
+        let val =
+            ((data[pos] as u32) << 16) | ((data[pos + 1] as u32) << 8) | (data[pos + 2] as u32);
         let h = val.wrapping_mul(50683);
         (h >> (32 - self.hash_bits)) as usize
     }
@@ -1226,7 +1303,7 @@ pub fn distance_to_slot(dist: u32) -> (u8, u32, u8) {
         let base = slot_base(slot);
         let extra_bits = (slot - 2) / 2;
         let next_base = base + (1 << extra_bits);
-        
+
         if dist >= base && dist < next_base {
             let extra_val = dist - base;
             return (slot, extra_val, extra_bits);
@@ -1258,7 +1335,11 @@ pub fn build_min_match_map(media_filter: &MediaFilterType, data_len: usize) -> V
             let plane_size = n * channels;
             for plane_idx in 0..4 {
                 // If min_match_per_plane bit is 1, min_match is 3
-                let min_match = if (mask & (1 << (plane_idx + 4))) != 0 { 3 } else { 4 };
+                let min_match = if (mask & (1 << (plane_idx + 4))) != 0 {
+                    3
+                } else {
+                    4
+                };
                 let start = (3 - plane_idx) * plane_size;
                 let end = start + plane_size;
                 map[start..end].fill(min_match);
@@ -1301,7 +1382,10 @@ mod tests {
         let tokens = encoder.encode(&data);
 
         // Verify matches are found
-        let match_count = tokens.iter().filter(|t| matches!(t, Lz77Token::Match { .. } | Lz77Token::RepMatch { .. })).count();
+        let match_count = tokens
+            .iter()
+            .filter(|t| matches!(t, Lz77Token::Match { .. } | Lz77Token::RepMatch { .. }))
+            .count();
         assert!(match_count > 0);
 
         let mut decoder = Lz77Decoder::new();
@@ -1327,7 +1411,7 @@ mod tests {
                      with adaptive order up to MAX_ORDER. PPM builds a statistical model \
                      of the data and predicts the probability of each next symbol. \
                      PPM builds a statistical model and predicts the probability.";
-                     
+
         let mut encoder = Lz77Encoder::new(true);
         let tokens = encoder.encode(data);
 
@@ -1348,7 +1432,7 @@ mod tests {
         // At index 14, "bcdefgh" matches at index 0 (len 7).
         // Since 7 > 4, lazy matching should emit 'a' as a literal, and match "bcdefgh".
         let data = b"bcdefgh_abcd_abcdbcdefgh";
-        
+
         let mut encoder_lazy = Lz77Encoder::new(true);
         let tokens_lazy = encoder_lazy.encode(data);
 
@@ -1373,7 +1457,13 @@ mod tests {
         let tokens = encoder.encode(data);
 
         assert_eq!(tokens[0], Lz77Token::Literal(b'a'));
-        assert_eq!(tokens[1], Lz77Token::RepMatch { index: 0, length: 5 });
+        assert_eq!(
+            tokens[1],
+            Lz77Token::RepMatch {
+                index: 0,
+                length: 5
+            }
+        );
 
         let mut decoder = Lz77Decoder::new();
         let decoded = decoder.decode(&tokens);
@@ -1404,8 +1494,14 @@ mod tests {
         let tokens = encoder.encode(data);
 
         // Verify there is at least one RepMatch token
-        let rep_match_count = tokens.iter().filter(|t| matches!(t, Lz77Token::RepMatch { .. })).count();
-        assert!(rep_match_count > 0, "No repcode matches found, check cache updates");
+        let rep_match_count = tokens
+            .iter()
+            .filter(|t| matches!(t, Lz77Token::RepMatch { .. }))
+            .count();
+        assert!(
+            rep_match_count > 0,
+            "No repcode matches found, check cache updates"
+        );
 
         let mut decoder = Lz77Decoder::new();
         let decoded = decoder.decode(&tokens);
@@ -1415,18 +1511,27 @@ mod tests {
     #[test]
     fn test_distance_slot_roundtrip_all() {
         let test_distances = [
-            1, 2, 3, 4, 5, 8, 16, 32, 64, 128, 1024, 65536, 1048576, 16777216,
-            134217728, 268435456
+            1, 2, 3, 4, 5, 8, 16, 32, 64, 128, 1024, 65536, 1048576, 16777216, 134217728, 268435456,
         ];
         for &dist in &test_distances {
             let (slot, extra, _extra_bits) = distance_to_slot(dist);
             let reconstructed = slot_to_distance(slot, extra);
             assert_eq!(reconstructed, dist, "Mismatch for distance {}", dist);
-            assert!(slot <= 55, "Slot {} exceeded 55 for distance {}", slot, dist);
+            assert!(
+                slot <= 55,
+                "Slot {} exceeded 55 for distance {}",
+                slot,
+                dist
+            );
         }
     }
 
-    fn brute_force_longest_match(data: &[u8], pos: usize, window_size: usize, min_match: usize) -> Option<(usize, usize)> {
+    fn brute_force_longest_match(
+        data: &[u8],
+        pos: usize,
+        window_size: usize,
+        min_match: usize,
+    ) -> Option<(usize, usize)> {
         if pos + min_match > data.len() {
             return None;
         }
@@ -1466,14 +1571,8 @@ mod tests {
             }
         }
 
-        let mut encoder = Lz77Encoder::new_with_params(
-            32 * 1024,
-            false,
-            4096,
-            258,
-            258,
-            MatchFinder::BinaryTree,
-        );
+        let mut encoder =
+            Lz77Encoder::new_with_params(32 * 1024, false, 4096, 258, 258, MatchFinder::BinaryTree);
 
         encoder.bt_left = vec![u32::MAX; data.len()];
         encoder.bt_right = vec![u32::MAX; data.len()];
@@ -1485,8 +1584,13 @@ mod tests {
 
         for pos in midpoint..(data.len() - 10) {
             let bst_match = encoder.find_best_match(&data, pos);
-            let bf_match = brute_force_longest_match(&data, pos, encoder.window_size, encoder.min_match_at(pos));
-            
+            let bf_match = brute_force_longest_match(
+                &data,
+                pos,
+                encoder.window_size,
+                encoder.min_match_at(pos),
+            );
+
             if let (Some((_bst_dist, bst_len)), Some((_bf_dist, bf_len))) = (bst_match, bf_match) {
                 assert_eq!(bst_len, bf_len, "Length mismatch at pos {}", pos);
             } else {
@@ -1495,9 +1599,16 @@ mod tests {
 
             let all_matches = encoder.find_all_matches(&data, pos);
             if let Some((_best_dist, best_len)) = bst_match {
-                assert!(!all_matches.is_empty(), "find_all_matches returned empty but best match exists");
+                assert!(
+                    !all_matches.is_empty(),
+                    "find_all_matches returned empty but best match exists"
+                );
                 let has_len = all_matches.iter().any(|m| m.length == best_len as u16);
-                assert!(has_len, "find_all_matches didn't contain the best match length at pos {}", pos);
+                assert!(
+                    has_len,
+                    "find_all_matches didn't contain the best match length at pos {}",
+                    pos
+                );
             }
 
             encoder.update_hash(&data, pos);
@@ -1507,14 +1618,8 @@ mod tests {
     #[test]
     fn test_bst_edge_cases() {
         let data = b"a".repeat(1000);
-        let mut encoder = Lz77Encoder::new_with_params(
-            32 * 1024,
-            false,
-            4096,
-            258,
-            258,
-            MatchFinder::BinaryTree,
-        );
+        let mut encoder =
+            Lz77Encoder::new_with_params(32 * 1024, false, 4096, 258, 258, MatchFinder::BinaryTree);
         encoder.bt_left = vec![u32::MAX; data.len()];
         encoder.bt_right = vec![u32::MAX; data.len()];
 
@@ -1530,14 +1635,8 @@ mod tests {
         }
 
         let data = b"abcde_abcde";
-        let mut encoder = Lz77Encoder::new_with_params(
-            32 * 1024,
-            false,
-            4096,
-            258,
-            258,
-            MatchFinder::BinaryTree,
-        );
+        let mut encoder =
+            Lz77Encoder::new_with_params(32 * 1024, false, 4096, 258, 258, MatchFinder::BinaryTree);
         encoder.bt_left = vec![u32::MAX; data.len()];
         encoder.bt_right = vec![u32::MAX; data.len()];
 
@@ -1556,32 +1655,43 @@ mod tests {
             let fixed = log2_fixed(val);
             let float = (val as f64).log2() * 256.0;
             let diff = (fixed as f64 - float).abs();
-            assert!(diff <= 2.0, "Mismatch at val {}: fixed={}, float={}, diff={}", val, fixed, float, diff);
+            assert!(
+                diff <= 2.0,
+                "Mismatch at val {}: fixed={}, float={}, diff={}",
+                val,
+                fixed,
+                float,
+                diff
+            );
         }
         for val in (10000..1000000).step_by(123) {
             let fixed = log2_fixed(val);
             let float = (val as f64).log2() * 256.0;
             let diff = (fixed as f64 - float).abs();
-            assert!(diff <= 2.0, "Mismatch at val {}: fixed={}, float={}, diff={}", val, fixed, float, diff);
+            assert!(
+                diff <= 2.0,
+                "Mismatch at val {}: fixed={}, float={}, diff={}",
+                val,
+                fixed,
+                float,
+                diff
+            );
         }
     }
 
     #[test]
     fn test_optimal_parse_roundtrip() {
         let data = b"Optimal parsing uses a dynamic programming parser to find the optimal path. Optimal parsing uses a dynamic programming parser. Dynamic programming parser is very strong.".repeat(10);
-        let mut encoder = Lz77Encoder::new_with_params(
-            32 * 1024,
-            true,
-            4096,
-            258,
-            258,
-            MatchFinder::BinaryTree,
-        );
+        let mut encoder =
+            Lz77Encoder::new_with_params(32 * 1024, true, 4096, 258, 258, MatchFinder::BinaryTree);
         let tokens = encoder.encode(&data);
 
         let mut decoder = Lz77Decoder::new();
         let decoded = decoder.decode(&tokens);
-        assert_eq!(data.to_vec(), decoded, "Decompressed output does not match original data!");
+        assert_eq!(
+            data.to_vec(),
+            decoded,
+            "Decompressed output does not match original data!"
+        );
     }
 }
-

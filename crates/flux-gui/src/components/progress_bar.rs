@@ -24,7 +24,7 @@ impl FluxProgressBar {
     pub fn show(&mut self, ui: &mut Ui, progress: f32, label: &str) {
         // Normalize target progress to 0.0 - 1.0 range
         let target = (progress / 100.0).clamp(0.0, 1.0);
-        
+
         // Smoothly interpolate the progress value
         let diff = target - self.current_value;
         if diff.abs() > 0.001 {
@@ -43,26 +43,23 @@ impl FluxProgressBar {
                 });
             });
             ui.add_space(3.0);
-            
+
             // Custom progress bar track
             let height = 14.0;
             let (rect, _response) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width(), height),
                 egui::Sense::hover(),
             );
-            
+
             // Track background (darker background)
-            ui.painter().rect_filled(
-                rect,
-                7.0,
-                ui.style().visuals.extreme_bg_color,
-            );
-            
+            ui.painter()
+                .rect_filled(rect, 7.0, ui.style().visuals.extreme_bg_color);
+
             // Filled progress (using a nice cyan gradient/color)
             if self.current_value > 0.0 {
                 let mut fill_rect = rect;
                 fill_rect.set_width(rect.width() * self.current_value);
-                
+
                 ui.painter().rect_filled(
                     fill_rect,
                     7.0,

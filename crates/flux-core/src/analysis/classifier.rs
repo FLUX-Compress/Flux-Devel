@@ -4,8 +4,8 @@
 //! Incompressible) and recommends optimal compression pipelines and settings.
 //! Designed to allow transparent replacement with a trained machine learning model (ML) in V2.
 
-use crate::threads::signals::{ContentType, CompressionPipeline};
 use super::entropy::EntropyEstimator;
+use crate::threads::signals::{CompressionPipeline, ContentType};
 
 /// Represents the classification decisions and parameter bundle produced by the classifier.
 ///
@@ -209,8 +209,16 @@ impl ContentClassifier {
                 return FileSignature::MachO;
             }
         }
-        if len >= 8 && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47
-            && data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A {
+        if len >= 8
+            && data[0] == 0x89
+            && data[1] == 0x50
+            && data[2] == 0x4E
+            && data[3] == 0x47
+            && data[4] == 0x0D
+            && data[5] == 0x0A
+            && data[6] == 0x1A
+            && data[7] == 0x0A
+        {
             return FileSignature::Png;
         }
         if len >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
@@ -248,7 +256,9 @@ impl ContentClassifier {
         if len >= 4 && data[0] == 0x28 && data[1] == 0xB5 && data[2] == 0x2F && data[3] == 0xFD {
             return FileSignature::Zstd;
         }
-        if len >= 7 && (data.starts_with(b"Rar!\x1a\x07\x00") || data.starts_with(b"Rar!\x1a\x07\x01\x00")) {
+        if len >= 7
+            && (data.starts_with(b"Rar!\x1a\x07\x00") || data.starts_with(b"Rar!\x1a\x07\x01\x00"))
+        {
             return FileSignature::Rar;
         }
         if len >= 4 && data.starts_with(b"%PDF") {
@@ -357,8 +367,14 @@ impl ContentClassifier {
         est_ratio: f32,
     ) -> ClassificationResult {
         // Rule 1: High-entropy pre-compressed Images
-        if matches!(sig, FileSignature::Jpeg | FileSignature::Png | FileSignature::Gif | FileSignature::Bmp | FileSignature::WebP)
-            && entropy > 7.0
+        if matches!(
+            sig,
+            FileSignature::Jpeg
+                | FileSignature::Png
+                | FileSignature::Gif
+                | FileSignature::Bmp
+                | FileSignature::WebP
+        ) && entropy > 7.0
         {
             return ClassificationResult {
                 content_type: ContentType::Incompressible,
@@ -371,7 +387,11 @@ impl ContentClassifier {
         }
 
         // Rule 2: High-entropy video formats
-        if matches!(sig, FileSignature::Mp4 | FileSignature::Mkv | FileSignature::Avi) && entropy > 6.5 {
+        if matches!(
+            sig,
+            FileSignature::Mp4 | FileSignature::Mkv | FileSignature::Avi
+        ) && entropy > 6.5
+        {
             return ClassificationResult {
                 content_type: ContentType::Incompressible,
                 pipeline: CompressionPipeline::StoreRaw,
@@ -428,7 +448,9 @@ impl ContentClassifier {
         }
 
         // Rule 6: Text or highly compressible low entropy documents
-        if matches!(sig, FileSignature::Ascii | FileSignature::Utf8Text) || (entropy < 4.5 && sig != FileSignature::Unknown) {
+        if matches!(sig, FileSignature::Ascii | FileSignature::Utf8Text)
+            || (entropy < 4.5 && sig != FileSignature::Unknown)
+        {
             return ClassificationResult {
                 content_type: ContentType::Text,
                 pipeline: CompressionPipeline::TextPipeline,
@@ -440,8 +462,10 @@ impl ContentClassifier {
         }
 
         // Rule 7: Executables or standard binary files
-        if matches!(sig, FileSignature::Elf | FileSignature::Pe | FileSignature::MachO)
-            || (4.5..=6.5).contains(&entropy)
+        if matches!(
+            sig,
+            FileSignature::Elf | FileSignature::Pe | FileSignature::MachO
+        ) || (4.5..=6.5).contains(&entropy)
         {
             return ClassificationResult {
                 content_type: ContentType::Binary,
@@ -488,7 +512,10 @@ mod tests {
         assert_eq!(classifier.detect_magic_bytes(zip), FileSignature::Zip);
 
         // Unknown
-        assert_eq!(classifier.detect_magic_bytes(&[0; 10]), FileSignature::Unknown);
+        assert_eq!(
+            classifier.detect_magic_bytes(&[0; 10]),
+            FileSignature::Unknown
+        );
     }
 
     #[test]
@@ -497,11 +524,17 @@ mod tests {
 
         // Pure ASCII text
         let ascii_text = b"Hello, this is a plain ASCII text stream. It contains spaces, punctuation, and newlines.\n";
-        assert_eq!(classifier.detect_magic_bytes(ascii_text), FileSignature::Ascii);
+        assert_eq!(
+            classifier.detect_magic_bytes(ascii_text),
+            FileSignature::Ascii
+        );
 
         // UTF-8 text with non-ASCII characters (e.g. Emoji)
         let utf8_text = "Hello World 🌍! UTF-8 validation check.".as_bytes();
-        assert_eq!(classifier.detect_magic_bytes(utf8_text), FileSignature::Utf8Text);
+        assert_eq!(
+            classifier.detect_magic_bytes(utf8_text),
+            FileSignature::Utf8Text
+        );
     }
 
     #[test]

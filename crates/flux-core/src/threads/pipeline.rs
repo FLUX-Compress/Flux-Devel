@@ -2,13 +2,13 @@
 //!
 //! Handles sequential execution pathways between block classifiers and compression engines.
 
+use crate::analysis::{BackwardsAnalyzer, StrideDetector};
+use crate::archive::format::BlockBoundaryHint;
+use crate::buffer::window::SlidingWindow;
+use crate::threads::signals::{CompressionSignal, StrideSignal};
+use crossbeam::channel::{unbounded, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use crossbeam::channel::{unbounded, Sender, Receiver};
-use crate::buffer::window::SlidingWindow;
-use crate::threads::signals::{StrideSignal, CompressionSignal};
-use crate::analysis::{StrideDetector, BackwardsAnalyzer};
-use crate::archive::format::BlockBoundaryHint;
 
 /// Multi-threaded compression execution pipeline.
 pub struct CompressionPipeline;
@@ -38,22 +38,20 @@ impl CompressionPipeline {
     /// 3. Receiver for routing stride and EOF/stability signals to the pipeline coordinator
     /// 4. Receiver for EOF block boundary hints
     /// 5. Sender to trigger pipeline shutdown/pause
-    pub fn spawn_analysis_pipeline(
-        window: Arc<SlidingWindow>,
-    ) -> AnalysisPipelineChannels {
+    pub fn spawn_analysis_pipeline(window: Arc<SlidingWindow>) -> AnalysisPipelineChannels {
         // 1. Setup channels
         // Forward stride detector output to the pipeline/coordinator
         let (stride_tx, stride_rx) = unbounded::<StrideSignal>();
-        
+
         // Stability feedback loop channel to stride analyzer
         let (backwards_tx, backwards_rx) = unbounded::<StrideSignal>();
-        
+
         // Dedicated channel for validator outputs to be broadcasted
         let (validator_tx, validator_rx) = unbounded::<StrideSignal>();
-        
+
         // Channel for EOF block boundary hints
         let (hints_tx, hints_rx) = unbounded::<Vec<BlockBoundaryHint>>();
-        
+
         // Control shutdown channel for coordinating thread exits
         let (shutdown_tx, shutdown_rx_stride) = unbounded::<CompressionSignal>();
         let shutdown_rx_backwards = shutdown_rx_stride.clone();
@@ -94,6 +92,12 @@ impl CompressionPipeline {
             validator.run();
         });
 
-        (stride_handle, backwards_handle, stride_rx, hints_rx, shutdown_tx)
+        (
+            stride_handle,
+            backwards_handle,
+            stride_rx,
+            hints_rx,
+            shutdown_tx,
+        )
     }
 }

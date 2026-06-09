@@ -50,7 +50,7 @@ impl ByteTransposer {
         }
         let len = data.len();
         let mut transposed = vec![0; len];
-        
+
         let num_blocks = len / s;
         let remainder = len % s;
 
@@ -84,7 +84,7 @@ impl ByteTransposer {
         }
         let len = data.len();
         let mut untransposed = vec![0; len];
-        
+
         let num_blocks = len / s;
         let remainder = len % s;
 
@@ -136,18 +136,13 @@ mod tests {
         ];
         let transposer = ByteTransposer::new(4);
         let transposed = transposer.transpose(&original);
-        
+
         // Expected concatenated planes:
         // P0: [10, 20, 30]
         // P1: [11, 21, 31]
         // P2: [12, 22, 32]
         // P3: [13, 23, 33]
-        let expected = vec![
-            10, 20, 30,
-            11, 21, 31,
-            12, 22, 32,
-            13, 23, 33,
-        ];
+        let expected = vec![10, 20, 30, 11, 21, 31, 12, 22, 32, 13, 23, 33];
         assert_eq!(transposed, expected);
     }
 
@@ -171,10 +166,7 @@ mod tests {
 
     #[test]
     fn test_inverse_transpose_roundtrip_stride8() {
-        let original = vec![
-            1, 2, 3, 4, 5, 6, 7, 8,
-            9, 10, 11, 12, 13, 14, 15, 16,
-        ];
+        let original = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let transposer = ByteTransposer::new(8);
         let transposed = transposer.transpose(&original);
         let untransposed = transposer.inverse_transpose(&transposed);

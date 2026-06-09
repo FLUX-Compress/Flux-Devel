@@ -23,16 +23,20 @@ impl PasswordField {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 ui.label(label);
-                
+
                 // Text input widget with dynamic masking
                 let text_edit = egui::TextEdit::singleline(&mut self.password)
                     .password(!self.visible)
                     .desired_width(200.0);
-                
+
                 ui.add(text_edit);
 
                 // Show/hide toggle button
-                let toggle_label = if self.visible { "Hide 👁" } else { "Show 👁" };
+                let toggle_label = if self.visible {
+                    "Hide 👁"
+                } else {
+                    "Show 👁"
+                };
                 if ui.button(toggle_label).clicked() {
                     self.visible = !self.visible;
                 }
@@ -41,12 +45,20 @@ impl PasswordField {
             // Password strength indicator bar
             if !self.password.is_empty() {
                 let strength = KeyDerivation::verify_key_strength(&self.password);
-                
+
                 let (color, strength_label, fill_percent) = match strength {
-                    PasswordStrength::Weak => (egui::Color32::from_rgb(220, 50, 50), "Weak 🔴", 0.25),
-                    PasswordStrength::Moderate => (egui::Color32::from_rgb(220, 180, 50), "Moderate 🟡", 0.5),
-                    PasswordStrength::Strong => (egui::Color32::from_rgb(50, 180, 50), "Strong 🟢", 0.75),
-                    PasswordStrength::VeryStrong => (egui::Color32::from_rgb(0, 120, 0), "Very Strong 🔥", 1.0),
+                    PasswordStrength::Weak => {
+                        (egui::Color32::from_rgb(220, 50, 50), "Weak 🔴", 0.25)
+                    }
+                    PasswordStrength::Moderate => {
+                        (egui::Color32::from_rgb(220, 180, 50), "Moderate 🟡", 0.5)
+                    }
+                    PasswordStrength::Strong => {
+                        (egui::Color32::from_rgb(50, 180, 50), "Strong 🟢", 0.75)
+                    }
+                    PasswordStrength::VeryStrong => {
+                        (egui::Color32::from_rgb(0, 120, 0), "Very Strong 🔥", 1.0)
+                    }
                 };
 
                 ui.add_space(2.0);
@@ -58,17 +70,12 @@ impl PasswordField {
                 // Custom bar rendering
                 let height = 4.0;
                 let width = 250.0;
-                let (rect, _response) = ui.allocate_exact_size(
-                    egui::vec2(width, height),
-                    egui::Sense::hover(),
-                );
-                
+                let (rect, _response) =
+                    ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+
                 // Draw background bar
-                ui.painter().rect_filled(
-                    rect,
-                    2.0,
-                    ui.style().visuals.extreme_bg_color,
-                );
+                ui.painter()
+                    .rect_filled(rect, 2.0, ui.style().visuals.extreme_bg_color);
 
                 // Draw filled strength portion
                 let mut progress_rect = rect;

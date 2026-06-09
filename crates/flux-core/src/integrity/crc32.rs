@@ -2,14 +2,14 @@
 //!
 //! Provides SIMD-accelerated CRC32 checksums and parallel background computation.
 
+use crate::buffer::circular::CircularBuffer;
+use crate::threads::signals::BufferSignal;
+use crossbeam::channel::Receiver;
+use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread::JoinHandle;
-use std::collections::HashMap;
-use std::sync::atomic::Ordering;
-use crossbeam::channel::Receiver;
-use crate::buffer::circular::CircularBuffer;
-use crate::threads::signals::BufferSignal;
 
 /// High-speed CRC32 checksum accumulator using the `crc32fast` engine.
 #[derive(Debug, Clone)]
@@ -83,14 +83,14 @@ impl ParallelCrc32 {
     /// Spawns a background thread that calculates CRC32s for all configured files.
     pub fn run(&self, signal_rx: Receiver<BufferSignal>) -> JoinHandle<HashMap<u64, u32>> {
         let buffer = self.buffer.clone();
-        
+
         // Clone files list from the mutex.
         let files = self.files.lock().unwrap().clone();
 
         std::thread::spawn(move || {
             let mut results = HashMap::new();
             let mut processed_abs = 0;
-            
+
             let mut current_file_idx = 0;
             let mut current_file_bytes_processed = 0u64;
             let mut current_hasher = crc32fast::Hasher::new();
@@ -110,15 +110,15 @@ impl ParallelCrc32 {
                 loop {
                     let tail = buffer.tail.load(Ordering::Acquire);
                     let head = buffer.head.load(Ordering::Acquire);
-                    
+
                     if processed_abs >= tail {
                         break;
                     }
-                    
+
                     let total_to_read = tail - processed_abs;
                     let chunk_size = std::cmp::min(total_to_read, 65536);
                     let offset = processed_abs - head;
-                    
+
                     let mut temp_buf = vec![0u8; chunk_size];
                     let bytes_read = buffer.read(&mut temp_buf, offset, chunk_size);
                     if bytes_read == 0 {
@@ -130,7 +130,8 @@ impl ParallelCrc32 {
                     while !data_left.is_empty() && current_file_idx < files.len() {
                         let (file_index, file_size) = files[current_file_idx];
                         let remaining_for_file = file_size - current_file_bytes_processed;
-                        let consume_len = std::cmp::min(data_left.len() as u64, remaining_for_file) as usize;
+                        let consume_len =
+                            std::cmp::min(data_left.len() as u64, remaining_for_file) as usize;
 
                         current_hasher.update(&data_left[..consume_len]);
                         current_file_bytes_processed += consume_len as u64;
@@ -149,7 +150,8 @@ impl ParallelCrc32 {
                             // Handle contiguous sequence of empty files
                             while current_file_idx < files.len() && files[current_file_idx].1 == 0 {
                                 let (next_file_index, _) = files[current_file_idx];
-                                results.insert(next_file_index, crc32fast::Hasher::new().finalize());
+                                results
+                                    .insert(next_file_index, crc32fast::Hasher::new().finalize());
                                 current_file_idx += 1;
                             }
                         }
@@ -188,7 +190,7 @@ mod tests {
     #[test]
     fn test_crc32_incremental_equals_single_pass() {
         let data = b"the quick brown fox jumps over the lazy dog";
-        
+
         let mut hasher1 = Crc32Hasher::new();
         hasher1.update(data);
         let val1 = hasher1.finalize();
@@ -211,7 +213,7 @@ mod tests {
 
         hasher.reset();
         assert_eq!(hasher.bytes_processed(), 0);
-        
+
         hasher.update(b"test data 1");
         let val2 = hasher.finalize();
         assert_eq!(val1, val2);

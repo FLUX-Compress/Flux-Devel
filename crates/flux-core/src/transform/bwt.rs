@@ -200,7 +200,10 @@ impl BurrowsWheelerTransform {
         if n == 0 {
             return Vec::new();
         }
-        assert!((primary_index as usize) < n, "Primary index out of bounds for BWT decode");
+        assert!(
+            (primary_index as usize) < n,
+            "Primary index out of bounds for BWT decode"
+        );
 
         let mut counts = [0; 256];
         for &byte in data {
@@ -243,7 +246,7 @@ mod tests {
         let original = b"banana";
         let bwt = BurrowsWheelerTransform::new(900_000);
         let (transformed, primary_index) = bwt.transform(original);
-        
+
         // "banana" rotates to sorted list:
         // 0: abanan (last: 'n')
         // 1: anaban (last: 'n')
@@ -283,13 +286,13 @@ mod tests {
     #[test]
     fn test_bwt_should_apply() {
         let bwt = BurrowsWheelerTransform::new(900_000);
-        
+
         // Text, low entropy -> apply
         assert!(bwt.should_apply(4.2, &ContentType::Text));
-        
+
         // Text, high entropy -> don't apply
         assert!(!bwt.should_apply(6.1, &ContentType::Text));
-        
+
         // Non-text -> don't apply
         assert!(!bwt.should_apply(3.5, &ContentType::Binary));
         assert!(!bwt.should_apply(2.0, &ContentType::Multimedia));

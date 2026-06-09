@@ -3,8 +3,8 @@
 //! Enables immediate detection of incorrect password inputs without trying to decrypt
 //! the entire archive payload.
 
-use crate::crypto::{EncryptionKey, CryptoError};
-use crate::crypto::stream::{EncryptedChunk, StreamEncryptor, StreamDecryptor};
+use crate::crypto::stream::{EncryptedChunk, StreamDecryptor, StreamEncryptor};
+use crate::crypto::{CryptoError, EncryptionKey};
 
 /// Plaintext string encrypted to form the password verification sentinel.
 pub const SENTINEL_PLAINTEXT: &[u8] = b"FLUX_VALID_KEY_V1";
@@ -20,13 +20,14 @@ pub fn create_sentinel(key: &EncryptionKey) -> Result<EncryptedChunk, CryptoErro
 /// Returns `Ok(true)` if the sentinel decrypts successfully and matches `SENTINEL_PLAINTEXT` (correct password).
 /// Returns `Ok(false)` if GCM verification fails (incorrect password).
 /// Returns `Err(e)` for any structural or formatting errors (corrupt header).
-pub fn verify_sentinel(key: &EncryptionKey, sentinel: &EncryptedChunk) -> Result<bool, CryptoError> {
+pub fn verify_sentinel(
+    key: &EncryptionKey,
+    sentinel: &EncryptedChunk,
+) -> Result<bool, CryptoError> {
     let mut decryptor = StreamDecryptor::new(key.clone());
-    
+
     match decryptor.decrypt_chunk(sentinel) {
-        Ok(plaintext) => {
-            Ok(plaintext == SENTINEL_PLAINTEXT)
-        }
+        Ok(plaintext) => Ok(plaintext == SENTINEL_PLAINTEXT),
         Err(CryptoError::AuthenticationFailed) => {
             // Decryption failed due to wrong password verification
             Ok(false)
@@ -41,8 +42,8 @@ pub fn verify_sentinel(key: &EncryptionKey, sentinel: &EncryptedChunk) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::Salt;
     use crate::crypto::keys::KeyDerivation;
+    use crate::crypto::Salt;
 
     #[test]
     fn test_sentinel_correct_password_verifies() {

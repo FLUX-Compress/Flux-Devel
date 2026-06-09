@@ -33,6 +33,12 @@ enum Commands {
         /// Compression level (tiny, fast, balanced, max, extreme)
         #[clap(short, long, default_value = "balanced")]
         level: String,
+        /// Target volume size in bytes (0 = single volume)
+        #[clap(short = 's', long, default_value = "0")]
+        volume_size: u64,
+        /// Force overwrite of existing sibling volume files
+        #[clap(long)]
+        force: bool,
     },
     /// Decompress a FLUX archive
     Decompress {
@@ -63,6 +69,8 @@ fn main() {
             output,
             password,
             level,
+            volume_size,
+            force,
         } => {
             let comp_level = match level.to_lowercase().as_str() {
                 "tiny" => Compression::Tiny,
@@ -79,9 +87,32 @@ fn main() {
                 }
             };
 
+            if force {
+                for vol_num in 1..=999 {
+                    let ext = format!("{:03}", vol_num);
+                    let mut path = output.clone();
+                    if let Some(existing_ext) = path.extension() {
+                        if existing_ext == "flx" {
+                            let filename = path.file_name().unwrap().to_string_lossy().into_owned();
+                            path.set_file_name(format!("{}.{}", filename, ext));
+                        } else {
+                            let filename = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                            path.set_file_name(format!("{}.{}", filename, ext));
+                        }
+                    } else {
+                        let filename = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                        path.set_file_name(format!("{}.{}", filename, ext));
+                    }
+                    if path.exists() {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+            }
+
             let mut builder = Archive::compress(&input)
                 .output(&output)
                 .level(comp_level)
+                .volume_size(volume_size)
                 .on_progress(|p| {
                     print!(
                         "\rProgress: {:.1}% — {} processed of {} [Current: {}]            ",
@@ -130,18 +161,16 @@ fn main() {
             output,
             password,
         } => {
-            let mut builder = Archive::extract(&input)
-                .output(&output)
-                .on_progress(|p| {
-                    print!(
-                        "\rProgress: {:.1}% — {} processed of {} [Current: {}]            ",
-                        p.percent(),
-                        p.bytes_processed(),
-                        p.bytes_total(),
-                        p.current_file()
-                    );
-                    let _ = std::io::Write::flush(&mut std::io::stdout());
-                });
+            let mut builder = Archive::extract(&input).output(&output).on_progress(|p| {
+                print!(
+                    "\rProgress: {:.1}% — {} processed of {} [Current: {}]            ",
+                    p.percent(),
+                    p.bytes_processed(),
+                    p.bytes_total(),
+                    p.current_file()
+                );
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+            });
 
             if let Some(ref pass) = password {
                 builder = builder.password(pass);

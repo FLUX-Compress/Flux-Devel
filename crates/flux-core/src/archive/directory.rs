@@ -3,9 +3,9 @@
 //! Handles scanning directories, metadata preservation (permissions, timestamps, empty directories,
 //! symlinks), and cross-platform restoration.
 
+use crate::archive::index::ArchiveError;
 use std::fs;
 use std::path::{Path, PathBuf};
-use crate::archive::index::ArchiveError;
 
 /// Preserved entry metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,8 +73,8 @@ impl DirectoryTree {
                 .map_err(|e| ArchiveError::Io(e.to_string()))?;
         } else {
             // Root is a single file. Scan it as a lone entry.
-            let entry = Self::scan_entry(root, root)
-                .map_err(|e| ArchiveError::Io(e.to_string()))?;
+            let entry =
+                Self::scan_entry(root, root).map_err(|e| ArchiveError::Io(e.to_string()))?;
             entries.push(entry);
         }
 
@@ -85,7 +85,11 @@ impl DirectoryTree {
     }
 
     /// Internal recursive scanner helper.
-    fn scan_dir(dir: &Path, base: &Path, entries: &mut Vec<DirectoryEntry>) -> Result<(), std::io::Error> {
+    fn scan_dir(
+        dir: &Path,
+        base: &Path,
+        entries: &mut Vec<DirectoryEntry>,
+    ) -> Result<(), std::io::Error> {
         // Read directory entries.
         let mut is_empty = true;
         let mut dir_entries = Vec::new();
@@ -150,7 +154,9 @@ impl DirectoryTree {
                 // Regular file.
                 entries.push(DirectoryEntry {
                     path: relative_path,
-                    entry_type: EntryType::RegularFile { size: metadata.len() },
+                    entry_type: EntryType::RegularFile {
+                        size: metadata.len(),
+                    },
                     metadata: entry_meta,
                 });
             }
@@ -191,7 +197,9 @@ impl DirectoryTree {
         } else {
             Ok(DirectoryEntry {
                 path: relative_path,
-                entry_type: EntryType::RegularFile { size: metadata.len() },
+                entry_type: EntryType::RegularFile {
+                    size: metadata.len(),
+                },
                 metadata: entry_meta,
             })
         }
@@ -205,19 +213,25 @@ impl DirectoryTree {
         };
         #[cfg(not(unix))]
         let permissions = {
-            let mut p = if metadata.permissions().readonly() { 0o444 } else { 0o666 };
+            let mut p = if metadata.permissions().readonly() {
+                0o444
+            } else {
+                0o666
+            };
             if metadata.is_dir() {
                 p |= 0o111;
             }
             p
         };
 
-        let modified_time = metadata.modified()
+        let modified_time = metadata
+            .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let created_time = metadata.created()
+        let created_time = metadata
+            .created()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
@@ -253,14 +267,16 @@ impl DirectoryTree {
 
             match &entry.entry_type {
                 EntryType::Directory | EntryType::EmptyDirectory => {
-                    fs::create_dir_all(&target_path).map_err(|e| ArchiveError::Io(e.to_string()))?;
+                    fs::create_dir_all(&target_path)
+                        .map_err(|e| ArchiveError::Io(e.to_string()))?;
                 }
                 EntryType::Symlink { target } => {
                     #[cfg(unix)]
                     {
                         use std::os::unix::fs::symlink;
                         let _ = fs::remove_file(&target_path);
-                        symlink(target, &target_path).map_err(|e| ArchiveError::Io(e.to_string()))?;
+                        symlink(target, &target_path)
+                            .map_err(|e| ArchiveError::Io(e.to_string()))?;
                     }
                     #[cfg(windows)]
                     {
@@ -341,11 +357,22 @@ mod tests {
 
         // Scan directory
         let tree = DirectoryTree::scan(temp_path).unwrap();
-        
-        let file_entry = tree.entries.iter().find(|e| e.path == Path::new("file.txt")).unwrap();
-        assert!(matches!(file_entry.entry_type, EntryType::RegularFile { size: 5 }));
 
-        let dir_entry = tree.entries.iter().find(|e| e.path == Path::new("subdir")).unwrap();
+        let file_entry = tree
+            .entries
+            .iter()
+            .find(|e| e.path == Path::new("file.txt"))
+            .unwrap();
+        assert!(matches!(
+            file_entry.entry_type,
+            EntryType::RegularFile { size: 5 }
+        ));
+
+        let dir_entry = tree
+            .entries
+            .iter()
+            .find(|e| e.path == Path::new("subdir"))
+            .unwrap();
         assert_eq!(dir_entry.entry_type, EntryType::EmptyDirectory); // Empty subdir
     }
 
@@ -358,7 +385,10 @@ mod tests {
         fs::create_dir(&empty_dir).unwrap();
 
         let tree = DirectoryTree::scan(temp_src.path()).unwrap();
-        assert!(tree.entries.iter().any(|e| e.entry_type == EntryType::EmptyDirectory));
+        assert!(tree
+            .entries
+            .iter()
+            .any(|e| e.entry_type == EntryType::EmptyDirectory));
 
         tree.restore(temp_dest.path()).unwrap();
         assert!(temp_dest.path().join("empty_dir").exists());
@@ -389,9 +419,15 @@ mod tests {
 
         if sym_path.exists() {
             let tree = DirectoryTree::scan(temp_path).unwrap();
-            let link_entry = tree.entries.iter().find(|e| e.path == Path::new("link.txt"));
+            let link_entry = tree
+                .entries
+                .iter()
+                .find(|e| e.path == Path::new("link.txt"));
             assert!(link_entry.is_some());
-            assert!(matches!(link_entry.unwrap().entry_type, EntryType::Symlink { .. }));
+            assert!(matches!(
+                link_entry.unwrap().entry_type,
+                EntryType::Symlink { .. }
+            ));
         }
     }
 }

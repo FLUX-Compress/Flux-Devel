@@ -3,10 +3,10 @@
 //! Detects repeating byte stride patterns (e.g., interleaved multi-channel audio,
 //! raw float tables, structured structs) using Pearson autocorrelation coefficients.
 
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use crate::buffer::window::SlidingWindow;
-use crate::threads::signals::{StrideSignal, CompressionSignal};
+use crate::threads::signals::{CompressionSignal, StrideSignal};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 /// Confidence threshold required to confirm a stride candidate in a single window.
 ///
@@ -140,11 +140,13 @@ impl StrideDetector {
             let corr = self.compute_autocorrelation(sample, stride);
             self.candidates[i].correlation = corr;
             if corr >= STRIDE_CONFIRMATION_THRESHOLD {
-                self.candidates[i].confirmation_count = self.candidates[i].confirmation_count.saturating_add(1);
+                self.candidates[i].confirmation_count =
+                    self.candidates[i].confirmation_count.saturating_add(1);
             } else {
                 self.candidates[i].confirmation_count = 0;
             }
-            self.candidates[i].is_confirmed = self.candidates[i].confirmation_count >= STRIDE_CONFIRMATION_WINDOWS;
+            self.candidates[i].is_confirmed =
+                self.candidates[i].confirmation_count >= STRIDE_CONFIRMATION_WINDOWS;
         }
 
         // Keep track of the confirmed candidate with highest correlation
@@ -391,7 +393,7 @@ impl StrideDetector {
             if plane_len <= 1 {
                 continue;
             }
-            
+
             for idx in (1..plane_len).rev() {
                 let curr_idx = start + idx;
                 let prev_idx = start + idx - 1;
@@ -532,7 +534,7 @@ mod tests {
         detector.test_all_candidates(&pattern);
         assert_eq!(detector.candidates[3].confirmation_count, 3);
         assert!(detector.candidates[3].is_confirmed);
-        
+
         assert_eq!(detector.best_candidate().unwrap().stride, 4);
         assert_eq!(detector.current_confirmed, Some(4));
         assert_eq!(window.get_stride_hint(), 4);

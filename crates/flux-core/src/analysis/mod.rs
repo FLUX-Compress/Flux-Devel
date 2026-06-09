@@ -87,12 +87,12 @@
 //! (`AtomicUsize`, `AtomicU8`) using strict Acquire/Release memory ordering. Communication across thread
 //! boundaries utilizes lock-free `crossbeam` channels. Structs inside this group are `Send` + `Sync`.
 
-pub mod classifier;
-pub mod stride;
 pub mod backwards;
+pub mod classifier;
 pub mod entropy;
+pub mod stride;
 
+pub use backwards::BackwardsAnalyzer;
 pub use classifier::{ClassificationResult, ContentClassifier, FileSignature};
 pub use entropy::EntropyEstimator;
 pub use stride::{AnalysisMode, StrideCandidate, StrideDetector};
-pub use backwards::BackwardsAnalyzer;

@@ -2,8 +2,8 @@
 //!
 //! Provides SHA-256 hash computation, checksum aggregation, and multi-level hierarchy verification.
 
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use sha2::{Sha256, Digest};
 
 /// Checksum set containing both CRC32 and SHA-256 hashes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -94,7 +94,10 @@ pub enum IntegrityResult {
     /// CRC32 mismatch.
     CrcMismatch { expected: u32, actual: u32 },
     /// SHA-256 mismatch.
-    Sha256Mismatch { expected: [u8; 32], actual: [u8; 32] },
+    Sha256Mismatch {
+        expected: [u8; 32],
+        actual: [u8; 32],
+    },
     /// Checksum not found in records.
     NotFound,
 }
@@ -215,10 +218,9 @@ mod tests {
         let digest = hasher.finalize();
         // SHA-256 of empty bytes
         let expected = [
-            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,
-            0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
-            0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
-            0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f,
+            0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b,
+            0x78, 0x52, 0xb8, 0x55,
         ];
         assert_eq!(digest, expected);
     }
@@ -226,7 +228,7 @@ mod tests {
     #[test]
     fn test_sha256_incremental_equals_single_pass() {
         let data = b"the quick brown fox jumps over the lazy dog";
-        
+
         let mut hasher1 = Sha256Hasher::new();
         hasher1.update(data);
         let val1 = hasher1.finalize();
@@ -246,9 +248,9 @@ mod tests {
     fn test_checksum_set_compute_and_verify() {
         let data = b"some check data";
         let cset = ChecksumSet::compute(data);
-        
+
         assert!(cset.verify(data));
-        
+
         let (crc_hex, sha_hex) = cset.to_hex_strings();
         assert_eq!(crc_hex.len(), 8);
         assert_eq!(sha_hex.len(), 64);
@@ -258,9 +260,9 @@ mod tests {
     fn test_checksum_set_detects_corruption() {
         let mut data = b"some check data".to_vec();
         let cset = ChecksumSet::compute(&data);
-        
+
         assert!(cset.verify(&data));
-        
+
         data[0] ^= 1; // flip a bit
         assert!(!cset.verify(&data));
     }
@@ -281,6 +283,9 @@ mod tests {
         assert_eq!(mli.verify_archive(archive_data), IntegrityResult::Ok);
 
         assert_eq!(mli.verify_file(101, file_data), IntegrityResult::NotFound);
-        assert!(matches!(mli.verify_file(100, b"wrong contents"), IntegrityResult::CrcMismatch { .. }));
+        assert!(matches!(
+            mli.verify_file(100, b"wrong contents"),
+            IntegrityResult::CrcMismatch { .. }
+        ));
     }
 }

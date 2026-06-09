@@ -86,29 +86,29 @@ impl CircularBuffer {
         let to_write = std::cmp::min(src.len(), space);
         let tail_val = self.tail.load(Ordering::Acquire);
         let write_idx = tail_val % self.capacity;
-        
+
         // Write up to the end of the logical capacity in one contiguous chunk
         let chunk1 = std::cmp::min(to_write, self.capacity - write_idx);
         unsafe {
             let src_ptr = src.as_ptr();
             let dest_first = self.data.as_ptr().add(write_idx) as *mut u8;
             std::ptr::copy_nonoverlapping(src_ptr, dest_first, chunk1);
-            
+
             let dest_mirror = self.data.as_ptr().add(write_idx + self.capacity) as *mut u8;
             std::ptr::copy_nonoverlapping(src_ptr, dest_mirror, chunk1);
-            
+
             // If the write wraps around, copy the remainder to the beginning
             if chunk1 < to_write {
                 let remainder = to_write - chunk1;
                 let src_rem = src_ptr.add(chunk1);
                 let dest_rem_first = self.data.as_ptr() as *mut u8;
                 std::ptr::copy_nonoverlapping(src_rem, dest_rem_first, remainder);
-                
+
                 let dest_rem_mirror = self.data.as_ptr().add(self.capacity) as *mut u8;
                 std::ptr::copy_nonoverlapping(src_rem, dest_rem_mirror, remainder);
             }
         }
-        
+
         self.tail.fetch_add(to_write, Ordering::Release);
         self.bytes_available.fetch_add(to_write, Ordering::Release);
         to_write
@@ -134,15 +134,15 @@ impl CircularBuffer {
         let to_write = std::cmp::min(max_len, space);
         let tail_val = self.tail.load(Ordering::Acquire);
         let write_idx = tail_val % self.capacity;
-        
+
         // Contiguous slice available in the logical buffer first half
         let chunk = std::cmp::min(to_write, self.capacity - write_idx);
-        
+
         let slice = unsafe {
             let ptr = self.data.as_ptr().add(write_idx) as *mut u8;
             std::slice::from_raw_parts_mut(ptr, chunk)
         };
-        
+
         let bytes_written = f(slice)?;
         if bytes_written > 0 {
             // Mirror written bytes to the second half
@@ -152,7 +152,8 @@ impl CircularBuffer {
                 std::ptr::copy_nonoverlapping(src, dest, bytes_written);
             }
             self.tail.fetch_add(bytes_written, Ordering::Release);
-            self.bytes_available.fetch_add(bytes_written, Ordering::Release);
+            self.bytes_available
+                .fetch_add(bytes_written, Ordering::Release);
         }
         Ok(bytes_written)
     }
@@ -173,7 +174,7 @@ impl CircularBuffer {
         let to_read = std::cmp::min(len, avail - offset);
         let head_val = self.head.load(Ordering::Acquire);
         let read_start = (head_val + offset) % self.capacity;
-        
+
         // Thanks to mirroring, read_start .. read_start + to_read is contiguous
         unsafe {
             let src = self.data.as_ptr().add(read_start);
@@ -220,7 +221,8 @@ impl CircularBuffer {
         let to_advance = std::cmp::min(bytes, avail);
         if to_advance > 0 {
             self.head.fetch_add(to_advance, Ordering::Release);
-            self.bytes_available.fetch_sub(to_advance, Ordering::Release);
+            self.bytes_available
+                .fetch_sub(to_advance, Ordering::Release);
         }
     }
 }

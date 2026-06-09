@@ -56,7 +56,10 @@ impl SecondaryEstimator {
         *self.stride_model.entry((plane, value)).or_insert(0) += 1;
 
         // Record joint frequency between adjacent plane value and current plane value
-        *self.cross_plane_model.entry((adjacent_plane_value, value, plane)).or_insert(0) += 1;
+        *self
+            .cross_plane_model
+            .entry((adjacent_plane_value, value, plane))
+            .or_insert(0) += 1;
 
         self.total_observations += 1;
     }
@@ -73,19 +76,34 @@ impl SecondaryEstimator {
 
         // Stride probability: how likely is the next byte to be equal to prev_value?
         let stride_count = *self.stride_model.get(&(plane, prev_value)).unwrap_or(&0) as f64;
-        let stride_total = self.stride_model.iter()
+        let stride_total = self
+            .stride_model
+            .iter()
             .filter(|&(&(p, _), _)| p == plane)
             .map(|(_, &c)| c as f64)
             .sum::<f64>();
-        let p_stride = if stride_total > 0.0 { stride_count / stride_total } else { 0.5 };
+        let p_stride = if stride_total > 0.0 {
+            stride_count / stride_total
+        } else {
+            0.5
+        };
 
         // Cross-plane probability: how likely is the next byte to be equal to adjacent_plane_value?
-        let cross_count = *self.cross_plane_model.get(&(adjacent_plane_value, adjacent_plane_value, plane)).unwrap_or(&0) as f64;
-        let cross_total = self.cross_plane_model.iter()
+        let cross_count = *self
+            .cross_plane_model
+            .get(&(adjacent_plane_value, adjacent_plane_value, plane))
+            .unwrap_or(&0) as f64;
+        let cross_total = self
+            .cross_plane_model
+            .iter()
             .filter(|&(&(pa, _, pi), _)| pa == adjacent_plane_value && pi == plane)
             .map(|(_, &c)| c as f64)
             .sum::<f64>();
-        let p_cross = if cross_total > 0.0 { cross_count / cross_total } else { 0.5 };
+        let p_cross = if cross_total > 0.0 {
+            cross_count / cross_total
+        } else {
+            0.5
+        };
 
         // Take the maximum correlation strength to highlight any learned pattern
         let p = p_stride.max(p_cross);
@@ -105,7 +123,7 @@ mod tests {
     #[test]
     fn test_secondary_neutral_before_warmup() {
         let mut estimator = SecondaryEstimator::new(4);
-        
+
         // Feed 500 observations (below the 1024 warmup threshold)
         for _ in 0..500 {
             estimator.observe(0, 42, 42, 100);
@@ -118,7 +136,7 @@ mod tests {
     #[test]
     fn test_secondary_learns_pattern() {
         let mut estimator = SecondaryEstimator::new(4);
-        
+
         // Feed 1100 observations of the same repeating byte (42) in plane 0
         for _ in 0..1100 {
             estimator.observe(0, 42, 42, 100);
@@ -133,7 +151,7 @@ mod tests {
     #[test]
     fn test_secondary_cross_plane_correlation() {
         let mut estimator = SecondaryEstimator::new(4);
-        
+
         // Feed 1100 observations where value in plane 0 (100) matches adjacent plane (100)
         for _ in 0..1100 {
             estimator.observe(0, 100, 42, 100);

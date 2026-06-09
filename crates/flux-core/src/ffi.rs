@@ -36,21 +36,21 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub enum FluxCompressionLevel {
-    Tiny     = 0,
-    Fast     = 1,
+    Tiny = 0,
+    Fast = 1,
     Balanced = 2,
-    Maximum  = 3,
-    Extreme  = 4,
+    Maximum = 3,
+    Extreme = 4,
 }
 
 /// Returns the window/block size in bytes for a given compression level.
 pub fn window_size_for_level(level: FluxCompressionLevel) -> usize {
     match level {
-        FluxCompressionLevel::Tiny     =>  256 * 1024,
-        FluxCompressionLevel::Fast     =>    4 * 1024 * 1024,
-        FluxCompressionLevel::Balanced =>   32 * 1024 * 1024,
-        FluxCompressionLevel::Maximum  =>  128 * 1024 * 1024,
-        FluxCompressionLevel::Extreme  =>  256 * 1024 * 1024,
+        FluxCompressionLevel::Tiny => 256 * 1024,
+        FluxCompressionLevel::Fast => 4 * 1024 * 1024,
+        FluxCompressionLevel::Balanced => 32 * 1024 * 1024,
+        FluxCompressionLevel::Maximum => 128 * 1024 * 1024,
+        FluxCompressionLevel::Extreme => 256 * 1024 * 1024,
     }
 }
 
@@ -64,17 +64,19 @@ pub fn window_size_for_level(level: FluxCompressionLevel) -> usize {
 ///   ErrCorruptData    (5) — archive magic, checksum, or structure invalid.
 ///   ErrWrongPassword  (6) — password was wrong or Argon2id validation failed.
 ///   ErrBufferTooSmall (7) — output buffer too small; *output_len set to required size.
+///   ErrUnsupportedFormat (8) — archive magic or version is not supported by this engine version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub enum FluxResult {
-    Ok               = 0,
-    ErrGeneric       = 1,
-    ErrInvalidParam  = 2,
-    ErrNullPointer   = 3,
-    ErrIo            = 4,
-    ErrCorruptData   = 5,
+    Ok = 0,
+    ErrGeneric = 1,
+    ErrInvalidParam = 2,
+    ErrNullPointer = 3,
+    ErrIo = 4,
+    ErrCorruptData = 5,
     ErrWrongPassword = 6,
     ErrBufferTooSmall = 7,
+    ErrUnsupportedFormat = 8,
 }
 
 /// Progress snapshot delivered to a `FluxProgressCallback` during an operation.
@@ -123,7 +125,8 @@ pub type FluxProgressCallback = extern "C" fn(event: FluxProgressEvent, user_dat
 ///   offset 12 : block_size   (uint32_t, 4 bytes)
 ///   offset 16 : level        (FluxCompressionLevel / C int, 4 bytes)
 ///   offset 20 : [4-byte end-alignment pad — not a field]
-///   sizeof    : 24 bytes
+///   offset 24 : volume_size  (uint64_t, 8 bytes)
+///   sizeof    : 32 bytes
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct FluxOptions {
@@ -136,6 +139,8 @@ pub struct FluxOptions {
     pub block_size: u32,
     /// Compression level / algorithm selector.
     pub level: FluxCompressionLevel,
+    /// Target volume size in bytes (0 = single-volume / no splitting).
+    pub volume_size: u64,
 }
 
 // =========================================================================
@@ -145,10 +150,12 @@ pub struct FluxOptions {
 fn map_archive_error(e: &crate::archive::ArchiveError) -> FluxResult {
     use crate::archive::ArchiveError;
     match e {
-        ArchiveError::WrongPassword | ArchiveError::DecryptionFailed => FluxResult::ErrWrongPassword,
+        ArchiveError::WrongPassword | ArchiveError::DecryptionFailed => {
+            FluxResult::ErrWrongPassword
+        }
         ArchiveError::InvalidMagic
-        | ArchiveError::UnsupportedVersion
-        | ArchiveError::CorruptIndex
+        | ArchiveError::UnsupportedVersion => FluxResult::ErrUnsupportedFormat,
+        ArchiveError::CorruptIndex
         | ArchiveError::HeaderCorrupt
         | ArchiveError::CorruptBlock(_)
         | ArchiveError::CorruptFile(_) => FluxResult::ErrCorruptData,
@@ -163,8 +170,7 @@ impl TempDir {
     fn new() -> std::io::Result<Self> {
         static CTR: AtomicU64 = AtomicU64::new(0);
         let n = CTR.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir()
-            .join(format!("flux_ffi_{}_{}", std::process::id(), n));
+        let dir = std::env::temp_dir().join(format!("flux_ffi_{}_{}", std::process::id(), n));
         std::fs::create_dir_all(&dir)?;
         Ok(Self(dir))
     }
@@ -191,7 +197,9 @@ unsafe impl Sync for SendPtr {}
 impl SendPtr {
     // Use a method so Rust 2021 closure precision captures the whole struct,
     // not just the inner `*mut c_void` field (which is !Send + !Sync).
-    fn get(&self) -> *mut c_void { self.0 }
+    fn get(&self) -> *mut c_void {
+        self.0
+    }
 }
 
 /// Builds the engine-internal `ProgressCallback` from a C callback + cookie.
@@ -200,24 +208,26 @@ fn make_progress_callback(
     user_data: *mut c_void,
 ) -> crate::ProgressCallback {
     let ud = SendPtr(user_data);
-    Some(Arc::new(move |bytes_processed: u64, bytes_total: u64, current_file: String| {
-        let c_file = std::ffi::CString::new(current_file.as_bytes()).unwrap_or_default();
-        let ratio = if bytes_total > 0 {
-            bytes_processed as f32 / bytes_total as f32
-        } else {
-            0.0
-        };
-        let event = FluxProgressEvent {
-            bytes_processed,
-            bytes_total,
-            current_file: c_file.as_ptr(),
-            compression_ratio: ratio,
-            detected_stride: 0,    // not reported on the per-file callback path
-            buffer_fill_level: 0.0,
-        };
-        // c_file is alive here; it drops after c_cb returns (synchronous call).
-        c_cb(event, ud.get());
-    }))
+    Some(Arc::new(
+        move |bytes_processed: u64, bytes_total: u64, current_file: String| {
+            let c_file = std::ffi::CString::new(current_file.as_bytes()).unwrap_or_default();
+            let ratio = if bytes_total > 0 {
+                bytes_processed as f32 / bytes_total as f32
+            } else {
+                0.0
+            };
+            let event = FluxProgressEvent {
+                bytes_processed,
+                bytes_total,
+                current_file: c_file.as_ptr(),
+                compression_ratio: ratio,
+                detected_stride: 0, // not reported on the per-file callback path
+                buffer_fill_level: 0.0,
+            };
+            // c_file is alive here; it drops after c_cb returns (synchronous call).
+            c_cb(event, ud.get());
+        },
+    ))
 }
 
 // =========================================================================
@@ -268,7 +278,9 @@ pub unsafe extern "C" fn flux_v1_compress(
     user_data: *mut c_void,
 ) -> FluxResult {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        compress_buf_impl(input, input_len, output, output_len, options, callback, user_data)
+        compress_buf_impl(
+            input, input_len, output, output_len, options, callback, user_data,
+        )
     }))
     .unwrap_or(FluxResult::ErrGeneric)
 }
@@ -291,6 +303,21 @@ unsafe fn compress_buf_impl(
         return FluxResult::ErrNullPointer;
     }
 
+    // --- option validation ---
+    let block_size = if options.block_size > 0 {
+        options.block_size
+    } else {
+        window_size_for_level(options.level) as u32
+    };
+    if options.volume_size > 0 && options.volume_size < block_size as u64 {
+        let block_size_mb = block_size as f64 / 1_048_576.0;
+        eprintln!(
+            "Error: Level {:?} uses {:.2} MB blocks; volume_size must be at least {:.2} MB. Use a lower compression level or increase volume_size.",
+            options.level, block_size_mb, block_size_mb
+        );
+        return FluxResult::ErrInvalidParam;
+    }
+
     let src: &[u8] = if input_len == 0 {
         &[]
     } else {
@@ -303,7 +330,7 @@ unsafe fn compress_buf_impl(
         Ok(d) => d,
         Err(_) => return FluxResult::ErrIo,
     };
-    let in_path  = tmp.path().join("input.bin");
+    let in_path = tmp.path().join("input.bin");
     let out_path = tmp.path().join("output.flx");
 
     if std::fs::write(&in_path, src).is_err() {
@@ -386,7 +413,7 @@ unsafe fn decompress_buf_impl(
         Err(_) => return FluxResult::ErrIo,
     };
     let arc_path = tmp.path().join("archive.flx");
-    let out_dir  = tmp.path().join("out");
+    let out_dir = tmp.path().join("out");
 
     if std::fs::write(&arc_path, src).is_err() {
         return FluxResult::ErrIo;
@@ -453,6 +480,21 @@ unsafe fn compress_dir_impl(
 ) -> FluxResult {
     if src_dir.is_null() || dest_archive.is_null() {
         return FluxResult::ErrNullPointer;
+    }
+
+    // --- option validation ---
+    let block_size = if options.block_size > 0 {
+        options.block_size
+    } else {
+        window_size_for_level(options.level) as u32
+    };
+    if options.volume_size > 0 && options.volume_size < block_size as u64 {
+        let block_size_mb = block_size as f64 / 1_048_576.0;
+        eprintln!(
+            "Error: Level {:?} uses {:.2} MB blocks; volume_size must be at least {:.2} MB. Use a lower compression level or increase volume_size.",
+            options.level, block_size_mb, block_size_mb
+        );
+        return FluxResult::ErrInvalidParam;
     }
 
     let src_s = match std::ffi::CStr::from_ptr(src_dir).to_str() {

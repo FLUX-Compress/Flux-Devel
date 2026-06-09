@@ -20,8 +20,8 @@
 //!     })
 //!     .run()?;
 //!
-//! println!("Compressed {} files! Ratio: {:.2}x", 
-//!     stats.files_processed(), 
+//! println!("Compressed {} files! Ratio: {:.2}x",
+//!     stats.files_processed(),
 //!     stats.compression_ratio()
 //! );
 //!
@@ -44,8 +44,8 @@
 //! - [GitHub Repository](https://github.com/acydd/flux)
 //! - [Documentation on docs.rs](https://docs.rs/flux)
 
-use std::path::{Path, PathBuf};
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 // Re-export C-compatible types from ffi via flux-sys just in case, but safe API uses custom enums.
 pub use flux_sys::{FluxCompressionLevel, FluxOptions, FluxResult};
@@ -206,6 +206,8 @@ pub enum FluxError {
     CompressionFailed(String),
     /// An input parameter (e.g. source/destination path) was invalid.
     InvalidInput(String),
+    /// The archive version or format is not supported.
+    UnsupportedFormat(String),
 }
 
 impl fmt::Display for FluxError {
@@ -219,6 +221,7 @@ impl fmt::Display for FluxError {
             }
             FluxError::CompressionFailed(s) => write!(f, "Compression failed: {}", s),
             FluxError::InvalidInput(s) => write!(f, "Invalid input parameter: {}", s),
+            FluxError::UnsupportedFormat(s) => write!(f, "Unsupported archive format: {}", s),
         }
     }
 }
@@ -229,24 +232,26 @@ impl From<flux_core_v1::archive::index::ArchiveError> for FluxError {
     fn from(err: flux_core_v1::archive::index::ArchiveError) -> Self {
         match err {
             flux_core_v1::archive::index::ArchiveError::InvalidMagic => {
-                FluxError::CorruptArchive("Invalid FLUX archive magic bytes".to_string())
+                FluxError::UnsupportedFormat("Invalid FLUX archive magic bytes".to_string())
             }
             flux_core_v1::archive::index::ArchiveError::UnsupportedVersion => {
-                FluxError::CorruptArchive("Unsupported FLUX archive version".to_string())
+                FluxError::UnsupportedFormat("Unsupported FLUX archive version".to_string())
             }
             flux_core_v1::archive::index::ArchiveError::CorruptIndex => {
                 FluxError::CorruptArchive("Corrupt archive file index".to_string())
             }
-            flux_core_v1::archive::index::ArchiveError::HeaderCorrupt => {
-                FluxError::CorruptArchive("Archive header is corrupted, cannot read this file".to_string())
-            }
+            flux_core_v1::archive::index::ArchiveError::HeaderCorrupt => FluxError::CorruptArchive(
+                "Archive header is corrupted, cannot read this file".to_string(),
+            ),
             flux_core_v1::archive::index::ArchiveError::CorruptBlock(id) => {
                 FluxError::CorruptArchive(format!("Corrupt solid block (id: {})", id))
             }
             flux_core_v1::archive::index::ArchiveError::CorruptFile(path) => {
                 FluxError::IntegrityCheckFailed { file: path }
             }
-            flux_core_v1::archive::index::ArchiveError::DecryptionFailed => FluxError::WrongPassword,
+            flux_core_v1::archive::index::ArchiveError::DecryptionFailed => {
+                FluxError::WrongPassword
+            }
             flux_core_v1::archive::index::ArchiveError::WrongPassword => FluxError::WrongPassword,
             flux_core_v1::archive::index::ArchiveError::Io(s) => FluxError::IoError(s),
         }
@@ -261,6 +266,7 @@ pub struct CompressBuilder {
     password: Option<String>,
     progress_callback: Option<Box<dyn Fn(Progress) + Send>>,
     verify_after: bool,
+    volume_size: u64,
 }
 
 impl CompressBuilder {
@@ -291,6 +297,12 @@ impl CompressBuilder {
     /// Enables or disables post-compression integrity verification.
     pub fn verify(mut self, verify: bool) -> Self {
         self.verify_after = verify;
+        self
+    }
+
+    /// Sets the target volume size in bytes (0 = single-volume / no splitting).
+    pub fn volume_size(mut self, size: u64) -> Self {
+        self.volume_size = size;
         self
     }
 
@@ -334,7 +346,8 @@ impl CompressBuilder {
         };
 
         // Wrap the progress callback so it is thread-safe and shareable
-        let progress_cb = progress_callback.map(|cb| std::sync::Arc::new(std::sync::Mutex::new(cb)));
+        let progress_cb =
+            progress_callback.map(|cb| std::sync::Arc::new(std::sync::Mutex::new(cb)));
 
         if let Some(ref cb) = progress_cb {
             if let Ok(guard) = cb.lock() {
@@ -365,33 +378,52 @@ impl CompressBuilder {
             Compression::Extreme => FluxCompressionLevel::Extreme,
         };
 
+        let block_size = flux_core_v1::ffi::window_size_for_level(core_level) as u32;
+        if self.volume_size > 0 && self.volume_size < block_size as u64 {
+            let level_name = match level {
+                Compression::Tiny => "Tiny",
+                Compression::Fast => "Fast",
+                Compression::Balanced => "Balanced",
+                Compression::Maximum => "Maximum",
+                Compression::Extreme => "Extreme",
+            };
+            let block_size_mb = block_size as f64 / 1_048_576.0;
+            return Err(FluxError::InvalidInput(format!(
+                "Level {} uses {:.2} MB blocks; volume_size must be at least {:.2} MB. Use a lower compression level or increase volume_size.",
+                level_name, block_size_mb, block_size_mb
+            )));
+        }
+
         let options = FluxOptions {
             level: core_level,
             password: password_ptr,
             thread_count: 0,
             block_size: 0,
+            volume_size: self.volume_size,
         };
 
         let mut compressor = flux_core_v1::FluxCompressor::new(options);
 
         if let Some(ref cb) = progress_cb {
             let cb_clone = std::sync::Arc::clone(cb);
-            compressor.progress_callback = Some(std::sync::Arc::new(move |bytes_processed, bytes_total, current_file| {
-                let percent = if bytes_total > 0 {
-                    (bytes_processed as f32 / bytes_total as f32) * 100.0
-                } else {
-                    0.0
-                };
-                if let Ok(guard) = cb_clone.lock() {
-                    guard(Progress {
-                        percent,
-                        current_file,
-                        bytes_processed,
-                        bytes_total,
-                        estimated_seconds_remaining: None,
-                    });
-                }
-            }));
+            compressor.progress_callback = Some(std::sync::Arc::new(
+                move |bytes_processed, bytes_total, current_file| {
+                    let percent = if bytes_total > 0 {
+                        (bytes_processed as f32 / bytes_total as f32) * 100.0
+                    } else {
+                        0.0
+                    };
+                    if let Ok(guard) = cb_clone.lock() {
+                        guard(Progress {
+                            percent,
+                            current_file,
+                            bytes_processed,
+                            bytes_total,
+                            estimated_seconds_remaining: None,
+                        });
+                    }
+                },
+            ));
         }
 
         let stats = if input.is_dir() {
@@ -403,11 +435,12 @@ impl CompressBuilder {
         if verify_after {
             let mut decompressor = flux_core_v1::FluxDecompressor::new(options);
             // Verify file structure reads and unpacks cleanly. We can discard stats or just test it.
-            let temp_dest = tempfile::tempdir()
-                .map_err(|e| FluxError::IoError(e.to_string()))?;
+            let temp_dest = tempfile::tempdir().map_err(|e| FluxError::IoError(e.to_string()))?;
             let d_stats = decompressor.decompress(&out, temp_dest.path())?;
             if !d_stats.integrity_verified {
-                return Err(FluxError::CorruptArchive("Post-verify check failed".to_string()));
+                return Err(FluxError::CorruptArchive(
+                    "Post-verify check failed".to_string(),
+                ));
             }
         }
 
@@ -478,6 +511,7 @@ impl ExtractBuilder {
             password: password_ptr,
             thread_count: 0,
             block_size: 0,
+            volume_size: 0,
         };
 
         let mut decompressor = flux_core_v1::FluxDecompressor::new(options);
@@ -501,6 +535,7 @@ impl ExtractBuilder {
             password: password_ptr,
             thread_count: 0,
             block_size: 0,
+            volume_size: 0,
         };
 
         let mut decompressor = flux_core_v1::FluxDecompressor::new(options);
@@ -536,16 +571,19 @@ impl ExtractBuilder {
             password: password_ptr,
             thread_count: 0,
             block_size: 0,
+            volume_size: 0,
         };
 
         // Determine total size from metadata
         let mut decompressor = flux_core_v1::FluxDecompressor::new(options);
-        let bytes_total = decompressor.read_archive_info(&input)
+        let bytes_total = decompressor
+            .read_archive_info(&input)
             .map(|info| info.0)
             .unwrap_or(0);
 
         // Wrap the progress callback so it is thread-safe and shareable
-        let progress_cb = progress_callback.map(|cb| std::sync::Arc::new(std::sync::Mutex::new(cb)));
+        let progress_cb =
+            progress_callback.map(|cb| std::sync::Arc::new(std::sync::Mutex::new(cb)));
 
         if let Some(ref cb) = progress_cb {
             if let Ok(guard) = cb.lock() {
@@ -561,22 +599,24 @@ impl ExtractBuilder {
 
         if let Some(ref cb) = progress_cb {
             let cb_clone = std::sync::Arc::clone(cb);
-            decompressor.progress_callback = Some(std::sync::Arc::new(move |bytes_processed, bytes_total, current_file| {
-                let percent = if bytes_total > 0 {
-                    (bytes_processed as f32 / bytes_total as f32) * 100.0
-                } else {
-                    0.0
-                };
-                if let Ok(guard) = cb_clone.lock() {
-                    guard(Progress {
-                        percent,
-                        current_file,
-                        bytes_processed,
-                        bytes_total,
-                        estimated_seconds_remaining: None,
-                    });
-                }
-            }));
+            decompressor.progress_callback = Some(std::sync::Arc::new(
+                move |bytes_processed, bytes_total, current_file| {
+                    let percent = if bytes_total > 0 {
+                        (bytes_processed as f32 / bytes_total as f32) * 100.0
+                    } else {
+                        0.0
+                    };
+                    if let Ok(guard) = cb_clone.lock() {
+                        guard(Progress {
+                            percent,
+                            current_file,
+                            bytes_processed,
+                            bytes_total,
+                            estimated_seconds_remaining: None,
+                        });
+                    }
+                },
+            ));
         }
 
         let stats = decompressor.decompress(&input, &out)?;
@@ -616,6 +656,7 @@ impl Archive {
             password: None,
             progress_callback: None,
             verify_after: false,
+            volume_size: 0,
         }
     }
 
@@ -643,6 +684,7 @@ mod tests {
         assert_eq!(builder.level, Compression::Balanced);
         assert!(builder.password.is_none());
         assert!(!builder.verify_after);
+        assert_eq!(builder.volume_size, 0);
     }
 
     #[test]
@@ -652,13 +694,15 @@ mod tests {
             .level(Compression::Maximum)
             .password("pass123")
             .on_progress(|_| {})
-            .verify(true);
+            .verify(true)
+            .volume_size(100_000_000);
 
         assert_eq!(builder.output.unwrap(), PathBuf::from("archive.flx"));
         assert_eq!(builder.level, Compression::Maximum);
         assert_eq!(builder.password.unwrap(), "pass123");
         assert!(builder.progress_callback.is_some());
         assert!(builder.verify_after);
+        assert_eq!(builder.volume_size, 100_000_000);
     }
 
     #[test]
@@ -684,10 +728,18 @@ mod tests {
         assert_eq!(format!("{}", err2), "Corrupt archive: header");
 
         let err3 = FluxError::WrongPassword;
-        assert_eq!(format!("{}", err3), "Incorrect password or decryption failed");
+        assert_eq!(
+            format!("{}", err3),
+            "Incorrect password or decryption failed"
+        );
 
-        let err4 = FluxError::IntegrityCheckFailed { file: "test.txt".to_string() };
-        assert_eq!(format!("{}", err4), "Integrity check failed for file: test.txt");
+        let err4 = FluxError::IntegrityCheckFailed {
+            file: "test.txt".to_string(),
+        };
+        assert_eq!(
+            format!("{}", err4),
+            "Integrity check failed for file: test.txt"
+        );
 
         let err5 = FluxError::CompressionFailed("oom".to_string());
         assert_eq!(format!("{}", err5), "Compression failed: oom");

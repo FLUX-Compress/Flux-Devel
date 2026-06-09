@@ -3,16 +3,16 @@
 //! Provides file and folder inputs, auto-suggests output paths,
 //! renders level cards, handles password settings, and triggers background threads.
 
+use egui::{Button, RichText, Ui};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use egui::{Button, RichText, Ui};
 
-use flux::{Archive, Compression};
-use crate::app::FluxApp;
 use crate::app::AppView;
+use crate::app::FluxApp;
 use crate::components::file_picker::FilePicker;
 use crate::components::password_field::PasswordField;
 use crate::state::CompressionState;
+use flux::{Archive, Compression};
 
 /// State for the Compress Configuration View.
 pub struct CompressView {
@@ -61,7 +61,11 @@ impl CompressView {
                 out_path.set_extension("flx");
             } else {
                 let name = in_path.file_name().unwrap_or_default();
-                out_path = in_path.parent().unwrap_or(in_path).join(name).with_extension("flx");
+                out_path = in_path
+                    .parent()
+                    .unwrap_or(in_path)
+                    .join(name)
+                    .with_extension("flx");
             }
             self.output_picker.path = Some(out_path);
         }
@@ -71,10 +75,10 @@ impl CompressView {
     pub fn scan_input(&mut self) {
         if self.picker.path != self.last_input_path {
             self.last_input_path = self.picker.path.clone();
-            
+
             let mut count = 0;
             let mut size = 0;
-            
+
             if let Some(ref path) = self.picker.path {
                 if path.is_file() {
                     count = 1;
@@ -83,7 +87,7 @@ impl CompressView {
                     count_dir(path, &mut count, &mut size);
                 }
             }
-            
+
             self.input_file_count = count;
             self.input_total_size = size;
         }
@@ -135,7 +139,7 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
         ui.group(|ui| {
             ui.vertical(|ui| {
                 ui.label(RichText::new("Input Path").strong());
-                
+
                 ui.horizontal(|ui| {
                     let mut path_str = match &view.picker.path {
                         Some(p) => p.to_string_lossy().to_string(),
@@ -164,10 +168,15 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                 // Input type and scans
                 view.scan_input();
                 if let Some(ref path) = view.picker.path {
-                    let kind = if path.is_dir() { "Directory" } else { "Regular File" };
-                    ui.label(format!("Type: {} | Scanned: {} files ({})", 
-                        kind, 
-                        view.input_file_count, 
+                    let kind = if path.is_dir() {
+                        "Directory"
+                    } else {
+                        "Regular File"
+                    };
+                    ui.label(format!(
+                        "Type: {} | Scanned: {} files ({})",
+                        kind,
+                        view.input_file_count,
                         format_size(view.input_total_size)
                     ));
                 } else {
@@ -197,18 +206,44 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                 // Side-by-side cards with wrapping
                 ui.horizontal_wrapped(|ui| {
                     let levels = [
-                        (Compression::Tiny, "Tiny", "Embedded/constrained", "Window: 256KB | Ratio: Low"),
-                        (Compression::Fast, "Fast", "Prioritizes speed", "Window: 4MB | Ratio: Med-Low"),
-                        (Compression::Balanced, "Balanced", "Optimal compromise", "Window: 32MB | Ratio: Med"),
-                        (Compression::Maximum, "Maximum", "Prioritizes ratio", "Window: 128MB | Ratio: High"),
-                        (Compression::Extreme, "Extreme", "Big data / big RAM", "Window: 256MB | Ratio: Peak"),
+                        (
+                            Compression::Tiny,
+                            "Tiny",
+                            "Embedded/constrained",
+                            "Window: 256KB | Ratio: Low",
+                        ),
+                        (
+                            Compression::Fast,
+                            "Fast",
+                            "Prioritizes speed",
+                            "Window: 4MB | Ratio: Med-Low",
+                        ),
+                        (
+                            Compression::Balanced,
+                            "Balanced",
+                            "Optimal compromise",
+                            "Window: 32MB | Ratio: Med",
+                        ),
+                        (
+                            Compression::Maximum,
+                            "Maximum",
+                            "Prioritizes ratio",
+                            "Window: 128MB | Ratio: High",
+                        ),
+                        (
+                            Compression::Extreme,
+                            "Extreme",
+                            "Big data / big RAM",
+                            "Window: 256MB | Ratio: Peak",
+                        ),
                     ];
 
                     for (level, name, desc, tradeoff) in levels {
                         let is_selected = view.level == level;
-                        
+
                         let card_size = egui::vec2(140.0, 80.0);
-                        let (rect, response) = ui.allocate_exact_size(card_size, egui::Sense::click());
+                        let (rect, response) =
+                            ui.allocate_exact_size(card_size, egui::Sense::click());
                         if response.clicked() {
                             view.level = level;
                         }
@@ -232,11 +267,16 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                         );
 
                         let layout_rect = rect.shrink(8.0);
-                        ui.child_ui(layout_rect, egui::Layout::top_down(egui::Align::Min)).vertical(|ui| {
-                            ui.label(RichText::new(name).strong());
-                            ui.label(RichText::new(desc).size(9.0).weak());
-                            ui.label(RichText::new(tradeoff).size(8.0).color(egui::Color32::from_rgb(0, 180, 220)));
-                        });
+                        ui.child_ui(layout_rect, egui::Layout::top_down(egui::Align::Min))
+                            .vertical(|ui| {
+                                ui.label(RichText::new(name).strong());
+                                ui.label(RichText::new(desc).size(9.0).weak());
+                                ui.label(
+                                    RichText::new(tradeoff)
+                                        .size(8.0)
+                                        .color(egui::Color32::from_rgb(0, 180, 220)),
+                                );
+                            });
                     }
                 });
 
@@ -250,7 +290,10 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                 }
 
                 ui.add_space(5.0);
-                ui.checkbox(&mut view.verify_after, "Verify archive integrity after compression");
+                ui.checkbox(
+                    &mut view.verify_after,
+                    "Verify archive integrity after compression",
+                );
             });
         });
 
@@ -258,7 +301,7 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
 
         // --- PREVIEW & ACTION ---
         let can_start = view.picker.path.is_some() && view.output_picker.path.is_some();
-        
+
         ui.horizontal(|ui| {
             // Estimated size calculations
             if can_start {
@@ -270,15 +313,24 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                     Compression::Extreme => 0.20,
                 };
                 let est_bytes = (view.input_total_size as f64 * ratio) as u64;
-                
+
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(format!("Estimated Archive Size: ~{}", format_size(est_bytes))).strong());
-                    ui.label(RichText::new(format!("Total Files: {}", view.input_file_count)).weak());
+                    ui.label(
+                        RichText::new(format!(
+                            "Estimated Archive Size: ~{}",
+                            format_size(est_bytes)
+                        ))
+                        .strong(),
+                    );
+                    ui.label(
+                        RichText::new(format!("Total Files: {}", view.input_file_count)).weak(),
+                    );
                 });
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let start_btn = Button::new(RichText::new("🚀 Start Compression").size(15.0).strong());
+                let start_btn =
+                    Button::new(RichText::new("🚀 Start Compression").size(15.0).strong());
                 if ui.add_enabled(can_start, start_btn).clicked() {
                     // Collect options
                     let in_path = view.picker.path.clone().unwrap();
@@ -286,7 +338,11 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                     let level = view.level;
                     let pass = if view.use_password {
                         let p = view.password_field.password.clone();
-                        if p.is_empty() { None } else { Some(p) }
+                        if p.is_empty() {
+                            None
+                        } else {
+                            Some(p)
+                        }
                     } else {
                         None
                     };
@@ -335,7 +391,11 @@ fn start_compression(
 
     let input_dbg = input.clone();
     let output_dbg = output.clone();
-    flux_core_v1::flux_debug!("[DEBUG] Spawning compression thread. Input: {:?}, Output: {:?}", input_dbg, output_dbg);
+    flux_core_v1::flux_debug!(
+        "[DEBUG] Spawning compression thread. Input: {:?}, Output: {:?}",
+        input_dbg,
+        output_dbg
+    );
 
     let handle = std::thread::spawn(move || {
         let update_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -360,7 +420,10 @@ fn start_compression(
         let res = builder.run();
         match &res {
             Ok(stats) => {
-                flux_core_v1::flux_debug!("[DEBUG] .run() returned Ok. Bytes written: {}", stats.compressed_size());
+                flux_core_v1::flux_debug!(
+                    "[DEBUG] .run() returned Ok. Bytes written: {}",
+                    stats.compressed_size()
+                );
             }
             Err(err) => {
                 flux_core_v1::flux_debug!("[DEBUG] .run() returned Err: {:?}", err);
@@ -369,7 +432,11 @@ fn start_compression(
         res
     });
 
-    *state = CompressionState::Running { progress, handle, start_time: std::time::Instant::now() };
+    *state = CompressionState::Running {
+        progress,
+        handle,
+        start_time: std::time::Instant::now(),
+    };
 }
 
 #[cfg(test)]
@@ -411,7 +478,7 @@ mod tests {
             if start.elapsed().as_secs() > 10 {
                 panic!("Compression timed out!");
             }
-            
+
             let is_finished = match &state {
                 CompressionState::Running { handle, .. } => handle.is_finished(),
                 _ => false,
@@ -426,25 +493,23 @@ mod tests {
         // Join/process completion just like app.rs does
         let active_state = std::mem::replace(&mut state, CompressionState::Idle);
         match active_state {
-            CompressionState::Running { handle, .. } => {
-                match handle.join() {
-                    Ok(Ok(stats)) => {
-                        println!("[TEST] Compression succeeded!");
-                        println!("[TEST] Files processed: {}", stats.files_processed());
-                        println!("[TEST] Original size: {}", stats.original_size());
-                        println!("[TEST] Compressed size: {}", stats.compressed_size());
-                        state = CompressionState::Complete(stats);
-                    }
-                    Ok(Err(e)) => {
-                        println!("[TEST] Compression failed with error: {:?}", e);
-                        state = CompressionState::Failed(e.to_string());
-                    }
-                    Err(_) => {
-                        println!("[TEST] Thread panicked");
-                        panic!("Thread panicked");
-                    }
+            CompressionState::Running { handle, .. } => match handle.join() {
+                Ok(Ok(stats)) => {
+                    println!("[TEST] Compression succeeded!");
+                    println!("[TEST] Files processed: {}", stats.files_processed());
+                    println!("[TEST] Original size: {}", stats.original_size());
+                    println!("[TEST] Compressed size: {}", stats.compressed_size());
+                    state = CompressionState::Complete(stats);
                 }
-            }
+                Ok(Err(e)) => {
+                    println!("[TEST] Compression failed with error: {:?}", e);
+                    state = CompressionState::Failed(e.to_string());
+                }
+                Err(_) => {
+                    println!("[TEST] Thread panicked");
+                    panic!("Thread panicked");
+                }
+            },
             _ => panic!("State was not Running!"),
         }
 
@@ -495,7 +560,7 @@ mod tests {
             if start.elapsed().as_secs() > 10 {
                 panic!("Compression timed out!");
             }
-            
+
             let is_finished = match &state {
                 CompressionState::Running { handle, .. } => handle.is_finished(),
                 _ => false,
@@ -510,30 +575,30 @@ mod tests {
         // Join/process completion just like app.rs does
         let active_state = std::mem::replace(&mut state, CompressionState::Idle);
         match active_state {
-            CompressionState::Running { handle, .. } => {
-                match handle.join() {
-                    Ok(Ok(_stats)) => {
-                        panic!("Expected failure but compression succeeded!");
-                    }
-                    Ok(Err(e)) => {
-                        println!("[TEST] Compression failed as expected with error: {:?}", e);
-                    }
-                    Err(_) => {
-                        panic!("Thread panicked");
-                    }
+            CompressionState::Running { handle, .. } => match handle.join() {
+                Ok(Ok(_stats)) => {
+                    panic!("Expected failure but compression succeeded!");
                 }
-            }
+                Ok(Err(e)) => {
+                    println!("[TEST] Compression failed as expected with error: {:?}", e);
+                }
+                Err(_) => {
+                    panic!("Thread panicked");
+                }
+            },
             _ => panic!("State was not Running!"),
         }
 
         // Check if output file exists
         if output_path.exists() {
             let metadata = std::fs::metadata(&output_path).unwrap();
-            println!("[TEST] Output file exists after failure! Size: {} bytes", metadata.len());
+            println!(
+                "[TEST] Output file exists after failure! Size: {} bytes",
+                metadata.len()
+            );
             let _ = std::fs::remove_file(&output_path);
         } else {
             println!("[TEST] Output file does not exist after failure.");
         }
     }
 }
-

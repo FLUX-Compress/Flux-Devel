@@ -4,9 +4,9 @@
 //! standard (recommended by OWASP) for password hashing and key derivation. It is memory-hard,
 //! making GPU and ASIC brute force attacks extremely expensive.
 
-use rand::{RngCore, rngs::OsRng};
-use argon2::{Argon2, Params, Algorithm, Version};
-use crate::crypto::{EncryptionKey, Salt, CryptoError};
+use crate::crypto::{CryptoError, EncryptionKey, Salt};
+use argon2::{Algorithm, Argon2, Params, Version};
+use rand::{rngs::OsRng, RngCore};
 
 /// 64MB memory requirement.
 /// At 64MB per hash check, a GPU with 8GB VRAM can run only ~128 hashing threads in parallel,
@@ -71,11 +71,13 @@ impl KeyDerivation {
             ARGON2_ITERATIONS,
             ARGON2_PARALLELISM,
             Some(KEY_LENGTH),
-        ).map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
+        )
+        .map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
 
         let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
         let mut key_bytes = [0u8; KEY_LENGTH];
-        argon2.hash_password_into(password.as_bytes(), &salt.0, &mut key_bytes)
+        argon2
+            .hash_password_into(password.as_bytes(), &salt.0, &mut key_bytes)
             .map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
 
         Ok(EncryptionKey(key_bytes))
@@ -97,7 +99,10 @@ impl KeyDerivation {
         let has_lower = password.chars().any(|c| c.is_lowercase());
         let has_digit = password.chars().any(|c| c.is_numeric());
         let has_special = password.chars().any(|c| !c.is_alphanumeric());
-        let variety = (has_upper as usize) + (has_lower as usize) + (has_digit as usize) + (has_special as usize);
+        let variety = (has_upper as usize)
+            + (has_lower as usize)
+            + (has_digit as usize)
+            + (has_special as usize);
 
         if len >= 12 {
             if variety >= 3 {
@@ -173,10 +178,25 @@ mod tests {
 
     #[test]
     fn test_verify_key_strength() {
-        assert_eq!(KeyDerivation::verify_key_strength("short"), PasswordStrength::Weak);
-        assert_eq!(KeyDerivation::verify_key_strength("predictable"), PasswordStrength::Weak);
-        assert_eq!(KeyDerivation::verify_key_strength("Predict1"), PasswordStrength::Moderate);
-        assert_eq!(KeyDerivation::verify_key_strength("PredictableSecret1!"), PasswordStrength::Strong);
-        assert_eq!(KeyDerivation::verify_key_strength("VeryLongPassphraseThatIsExtremelySafe"), PasswordStrength::VeryStrong);
+        assert_eq!(
+            KeyDerivation::verify_key_strength("short"),
+            PasswordStrength::Weak
+        );
+        assert_eq!(
+            KeyDerivation::verify_key_strength("predictable"),
+            PasswordStrength::Weak
+        );
+        assert_eq!(
+            KeyDerivation::verify_key_strength("Predict1"),
+            PasswordStrength::Moderate
+        );
+        assert_eq!(
+            KeyDerivation::verify_key_strength("PredictableSecret1!"),
+            PasswordStrength::Strong
+        );
+        assert_eq!(
+            KeyDerivation::verify_key_strength("VeryLongPassphraseThatIsExtremelySafe"),
+            PasswordStrength::VeryStrong
+        );
     }
 }

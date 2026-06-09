@@ -6,9 +6,9 @@
 use egui::{RichText, Ui};
 use sysinfo::System;
 
-use flux::Compression;
 use crate::app::FluxApp;
 use crate::state::Theme;
+use flux::Compression;
 
 /// Renders the Settings page and saves modifications.
 pub fn show(app: &mut FluxApp, ui: &mut Ui) {
@@ -26,7 +26,10 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                 ui.add_space(5.0);
 
                 let mut auto_threads = settings.thread_count_override.is_none();
-                if ui.checkbox(&mut auto_threads, "Auto-detect threads (recommended)").changed() {
+                if ui
+                    .checkbox(&mut auto_threads, "Auto-detect threads (recommended)")
+                    .changed()
+                {
                     if auto_threads {
                         settings.thread_count_override = None;
                     } else {
@@ -62,11 +65,18 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                 let default_buffer_mb = total_ram_mb / 10; // 10% of RAM
 
                 let mut default_buffer = settings.buffer_size_override.is_none();
-                if ui.checkbox(&mut default_buffer, format!("Default (10% of RAM: ~{} MB)", default_buffer_mb)).changed() {
+                if ui
+                    .checkbox(
+                        &mut default_buffer,
+                        format!("Default (10% of RAM: ~{} MB)", default_buffer_mb),
+                    )
+                    .changed()
+                {
                     if default_buffer {
                         settings.buffer_size_override = None;
                     } else {
-                        settings.buffer_size_override = Some((default_buffer_mb * 1024 * 1024) as usize);
+                        settings.buffer_size_override =
+                            Some((default_buffer_mb * 1024 * 1024) as usize);
                     }
                     changed = true;
                 }
@@ -95,19 +105,54 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
 
                 ui.horizontal(|ui| {
                     ui.label("Default Level:");
-                    if ui.radio_value(&mut settings.default_compression_level, Compression::Tiny, "Tiny").changed() {
+                    if ui
+                        .radio_value(
+                            &mut settings.default_compression_level,
+                            Compression::Tiny,
+                            "Tiny",
+                        )
+                        .changed()
+                    {
                         changed = true;
                     }
-                    if ui.radio_value(&mut settings.default_compression_level, Compression::Fast, "Fast").changed() {
+                    if ui
+                        .radio_value(
+                            &mut settings.default_compression_level,
+                            Compression::Fast,
+                            "Fast",
+                        )
+                        .changed()
+                    {
                         changed = true;
                     }
-                    if ui.radio_value(&mut settings.default_compression_level, Compression::Balanced, "Balanced").changed() {
+                    if ui
+                        .radio_value(
+                            &mut settings.default_compression_level,
+                            Compression::Balanced,
+                            "Balanced",
+                        )
+                        .changed()
+                    {
                         changed = true;
                     }
-                    if ui.radio_value(&mut settings.default_compression_level, Compression::Maximum, "Maximum").changed() {
+                    if ui
+                        .radio_value(
+                            &mut settings.default_compression_level,
+                            Compression::Maximum,
+                            "Maximum",
+                        )
+                        .changed()
+                    {
                         changed = true;
                     }
-                    if ui.radio_value(&mut settings.default_compression_level, Compression::Extreme, "Extreme").changed() {
+                    if ui
+                        .radio_value(
+                            &mut settings.default_compression_level,
+                            Compression::Extreme,
+                            "Extreme",
+                        )
+                        .changed()
+                    {
                         changed = true;
                     }
                 });
@@ -151,7 +196,10 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                 ui.horizontal(|ui| {
                     ui.label("Color Theme:");
                     let mut theme = settings.theme;
-                    if ui.radio_value(&mut theme, Theme::System, "System").changed() {
+                    if ui
+                        .radio_value(&mut theme, Theme::System, "System")
+                        .changed()
+                    {
                         settings.theme = theme;
                         apply_theme(ui.ctx(), theme);
                         changed = true;
@@ -183,7 +231,7 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
                      routing, adaptive plane transposition, context mixed PPM-I modeling, \
                      and secure AES-256-GCM encryption.",
                 );
-                
+
                 ui.add_space(5.0);
                 ui.hyperlink_to("GitHub Project Repository", "https://github.com/acydd/flux");
                 ui.add_space(5.0);

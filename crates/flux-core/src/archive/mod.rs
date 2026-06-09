@@ -30,11 +30,11 @@
 //! * [`solid`]: Grouping logic for files inside solid blocks.
 //! * [`directory`]: OS directory and metadata storage.
 
+pub mod directory;
 pub mod format;
 pub mod index;
 pub mod solid;
-pub mod directory;
 
+pub use directory::{DirectoryEntry, DirectoryTree, EntryMetadata, EntryType};
 pub use index::{ArchiveError, FileIndex};
 pub use solid::{SolidBlockBuilder, SolidBlockGrouper};
-pub use directory::{DirectoryTree, DirectoryEntry, EntryType, EntryMetadata};

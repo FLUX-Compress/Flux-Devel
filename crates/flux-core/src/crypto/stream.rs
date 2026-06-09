@@ -4,10 +4,10 @@
 //! (via encryption) and integrity/authenticity (via an authentication tag). If any byte of the
 //! ciphertext or metadata is altered, the decryption engine rejects the stream completely.
 
-use aes_gcm::{Aes256Gcm, Key, Nonce};
+use crate::crypto::{AuthTag, CryptoError, EncryptionKey, Iv};
 use aes_gcm::aead::{Aead, KeyInit, Payload};
-use rand::{RngCore, rngs::OsRng};
-use crate::crypto::{EncryptionKey, Iv, AuthTag, CryptoError};
+use aes_gcm::{Aes256Gcm, Key, Nonce};
+use rand::{rngs::OsRng, RngCore};
 
 /// 1MB chunks.
 /// Performing authentication on 1MB boundaries prevents the decompressor from having
@@ -71,7 +71,8 @@ impl StreamEncryptor {
         };
 
         // aes-gcm appends the 16-byte authentication tag to the ciphertext
-        let ciphertext_with_tag = cipher.encrypt(nonce, payload)
+        let ciphertext_with_tag = cipher
+            .encrypt(nonce, payload)
             .map_err(|e| CryptoError::InvalidParameter(e.to_string()))?;
 
         if ciphertext_with_tag.len() < GCM_TAG_SIZE {
@@ -158,11 +159,10 @@ impl StreamDecryptor {
             aad: &aad,
         };
 
-        let plaintext = cipher.decrypt(nonce, payload)
-            .map_err(|_| {
-                self.poisoned = true;
-                CryptoError::AuthenticationFailed
-            })?;
+        let plaintext = cipher.decrypt(nonce, payload).map_err(|_| {
+            self.poisoned = true;
+            CryptoError::AuthenticationFailed
+        })?;
 
         self.expected_chunk_index += 1;
         Ok(plaintext)

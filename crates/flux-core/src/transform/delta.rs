@@ -106,27 +106,24 @@ mod tests {
         let original = vec![10, 12, 15, 20, 25, 24, 20, 100, 105];
         let mut encoder = DeltaEncoder::new(1);
         let encoded = encoder.encode(&original);
-        
+
         let mut decoder = DeltaEncoder::new(1);
         let decoded = decoder.decode(&encoded);
-        
+
         assert_eq!(decoded, original);
     }
 
     #[test]
     fn test_delta_encode_decode_stride4() {
         let original = vec![
-            10, 20, 30, 40,
-            12, 22, 32, 42,
-            15, 25, 35, 45,
-            20, 30, 40, 50,
+            10, 20, 30, 40, 12, 22, 32, 42, 15, 25, 35, 45, 20, 30, 40, 50,
         ];
         let mut encoder = DeltaEncoder::new(4);
         let encoded = encoder.encode(&original);
-        
+
         let mut decoder = DeltaEncoder::new(4);
         let decoded = decoder.decode(&encoded);
-        
+
         assert_eq!(decoded, original);
     }
 
@@ -134,11 +131,11 @@ mod tests {
     fn test_delta_carries_across_blocks() {
         let block1 = vec![10, 20, 30];
         let block2 = vec![15, 25, 35];
-        
+
         let mut encoder = DeltaEncoder::new(1);
         let enc1 = encoder.encode(&block1);
         let enc2 = encoder.encode(&block2);
-        
+
         // Block 1 should encode against 0 seed:
         // [10, 10, 10]
         assert_eq!(enc1, vec![10, 10, 10]);
@@ -150,7 +147,7 @@ mod tests {
         let mut decoder = DeltaEncoder::new(1);
         let dec1 = decoder.decode(&enc1);
         let dec2 = decoder.decode(&enc2);
-        
+
         assert_eq!(dec1, block1);
         assert_eq!(dec2, block2);
     }
@@ -173,17 +170,15 @@ mod tests {
         // Plane 1: indices 1, 5, 9 -> original [0x00, 0x00, 0x00] -> encoded [0x00, 0x00, 0x00]
         // Plane 2: indices 2, 6, 10 -> original [0x80, 0x00, 0x40] -> encoded [0x80, 0x80, 0x40]
         // Plane 3: indices 3, 7, 11 -> original [0x3F, 0x40, 0x40] -> encoded [0x3F, 0x01, 0x00]
-        
+
         // Concatenated interleaved output:
         // E0: [0x00, 0x00, 0x80, 0x3F]
         // E1: [0x00, 0x00, 0x80, 0x01]
         // E2: [0x00, 0x00, 0x40, 0x00]
         let expected = vec![
-            0x00, 0x00, 0x80, 0x3F,
-            0x00, 0x00, 0x80, 0x01,
-            0x00, 0x00, 0x40, 0x00,
+            0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x80, 0x01, 0x00, 0x00, 0x40, 0x00,
         ];
-        
+
         assert_eq!(encoded, expected);
 
         // Verify roundtrip

@@ -31,4 +31,4 @@ pub mod crc32;
 pub mod sha256;
 
 pub use crc32::{Crc32Hasher, ParallelCrc32};
-pub use sha256::{Sha256Hasher, ChecksumSet, MultiLevelIntegrity, IntegrityResult};
+pub use sha256::{ChecksumSet, IntegrityResult, MultiLevelIntegrity, Sha256Hasher};

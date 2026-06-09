@@ -91,6 +91,7 @@ private:
             case FLUX_ERR_CORRUPT_DATA:  return "flux: corrupt or invalid archive";
             case FLUX_ERR_WRONG_PASS:    return "flux: wrong password";
             case FLUX_ERR_BUFFER_SMALL:  return "flux: output buffer too small";
+            case FLUX_ERR_UNSUPPORTED_FORMAT: return "flux: unsupported format or version";
             default:                     return "flux: unknown error";
         }
     }
@@ -125,6 +126,7 @@ public:
     uint32_t             thread_count = 0;   /* 0 = auto */
     uint32_t             block_size   = 0;   /* 0 = auto */
     std::string          password;           /* empty = no encryption */
+    uint64_t             volume_size  = 0;   /* 0 = single-volume */
 
     /**
      * Convert to the C struct expected by the API.
@@ -137,6 +139,7 @@ public:
         o.thread_count = thread_count;
         o.block_size   = block_size;
         o.level        = level;
+        o.volume_size  = volume_size;
         return o;
     }
 };

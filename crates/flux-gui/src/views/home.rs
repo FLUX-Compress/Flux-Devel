@@ -3,9 +3,9 @@
 //! Renders branding, main buttons, drag-and-drop file inputs,
 //! and the list of recently created/extracted archives.
 
-use egui::{Align, Button, Layout, RichText, Ui};
-use crate::app::FluxApp;
 use crate::app::AppView;
+use crate::app::FluxApp;
+use egui::{Align, Button, Layout, RichText, Ui};
 
 /// Renders the Home page view of the application.
 pub fn show(app: &mut FluxApp, ui: &mut Ui) {
@@ -30,7 +30,7 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
         // Main operations: Compress & Extract
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 20.0;
-            
+
             // Align buttons nicely in the center
             let total_width = 380.0; // two 180px buttons + 20px spacing
             let offset = (ui.available_width() - total_width) / 2.0;
@@ -52,7 +52,7 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
         // Drag and drop target area
         let drop_rect_size = egui::vec2(ui.available_width().min(500.0), 120.0);
         let (rect, response) = ui.allocate_exact_size(drop_rect_size, egui::Sense::hover());
-        
+
         let visual = ui.style().interact(&response);
         let border_color = if ui.ctx().input(|i| !i.raw.hovered_files.is_empty()) {
             egui::Color32::from_rgb(0, 180, 220) // Highlight border when dragging over
@@ -60,12 +60,9 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
             visual.bg_stroke.color
         };
 
-        ui.painter().rect_stroke(
-            rect,
-            8.0,
-            egui::Stroke::new(2.0, border_color),
-        );
-        
+        ui.painter()
+            .rect_stroke(rect, 8.0, egui::Stroke::new(2.0, border_color));
+
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -92,7 +89,7 @@ pub fn show(app: &mut FluxApp, ui: &mut Ui) {
         ui.vertical(|ui| {
             ui.label(RichText::new("Recent Archives").strong().size(14.0));
             ui.add_space(5.0);
-            
+
             if app.settings.recent_archives.is_empty() {
                 ui.label("No recent archives. Select Compress or Extract above to begin.");
             } else {

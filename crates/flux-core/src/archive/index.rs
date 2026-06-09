@@ -3,9 +3,9 @@
 //! Handles serialization, deserialization, and indexing of files at the front and back
 //! of FLUX archives.
 
-use std::fmt;
 use crate::archive::format::FileEntry;
 use crate::integrity::ChecksumSet;
+use std::fmt;
 
 /// Represents error states encountered during archive read, write, or verification.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,7 +36,9 @@ impl fmt::Display for ArchiveError {
             ArchiveError::InvalidMagic => write!(f, "Invalid FLUX archive magic bytes"),
             ArchiveError::UnsupportedVersion => write!(f, "Unsupported FLUX archive version"),
             ArchiveError::CorruptIndex => write!(f, "Corrupt archive file index"),
-            ArchiveError::HeaderCorrupt => write!(f, "Archive header is corrupted, cannot read this file"),
+            ArchiveError::HeaderCorrupt => {
+                write!(f, "Archive header is corrupted, cannot read this file")
+            }
             ArchiveError::CorruptBlock(id) => write!(f, "Corrupt solid block (id: {})", id),
             ArchiveError::CorruptFile(path) => write!(f, "Corrupt file data: {}", path),
             ArchiveError::DecryptionFailed => write!(f, "Decryption failed"),
@@ -137,12 +139,16 @@ impl FileIndex {
 
         let mut pos = 0;
         let total_compressed_size = u64::from_le_bytes(
-            data[pos..pos + 8].try_into().map_err(|_| ArchiveError::CorruptIndex)?
+            data[pos..pos + 8]
+                .try_into()
+                .map_err(|_| ArchiveError::CorruptIndex)?,
         );
         pos += 8;
 
         let entries_count = u32::from_le_bytes(
-            data[pos..pos + 4].try_into().map_err(|_| ArchiveError::CorruptIndex)?
+            data[pos..pos + 4]
+                .try_into()
+                .map_err(|_| ArchiveError::CorruptIndex)?,
         ) as usize;
         pos += 4;
 
@@ -152,7 +158,9 @@ impl FileIndex {
                 return Err(ArchiveError::CorruptIndex);
             }
             let path_len = u32::from_le_bytes(
-                data[pos..pos + 4].try_into().map_err(|_| ArchiveError::CorruptIndex)?
+                data[pos..pos + 4]
+                    .try_into()
+                    .map_err(|_| ArchiveError::CorruptIndex)?,
             ) as usize;
             pos += 4;
 
