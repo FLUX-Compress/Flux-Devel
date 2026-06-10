@@ -1,0 +1,20 @@
+# Cargo configuration for raw FLUX FFI bindings.
+[package]
+# The name of the crate. Named with the "-sys" suffix to denote raw, unsafe FFI bindings.
+name = "flux-sys"
+# The current version of this crate.
+version = "1.2.0"
+# Rust edition to use for compilation.
+edition = "2021"
+# Authors/Contributors of the project.
+authors = ["FLUX Contributors"]
+# A brief description of the crate's purpose, shown on crates.io.
+description = "Raw, low-level unsafe FFI bindings for FLUX compression core DLL"
+# Crate licensing under GPL-3.0 or commercial license.
+license = "GPL-3.0-only OR Commercial"
+
+[dependencies]
+# Path dependency to flux-core. 
+# NOTE: In a published distribution, flux-sys would link against the pre-compiled 
+# dynamic library (DLL on Windows, SO on Linux, dylib on macOS) instead of a direct source dependency.
+flux-core = { path = "../flux-core" }

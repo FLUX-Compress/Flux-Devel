@@ -1,0 +1,30 @@
+# Cargo configuration for the safe, high-level FLUX compression and archiving library.
+[package]
+# The public name of the library under which it will be published to crates.io.
+name = "flux"
+# Semantic versioning (SemVer) of the safe wrapper library. Release version 1.0.0.
+version = "1.2.0"
+# Specifies the version of the Cargo manifest and compilation rules to use.
+edition = "2021"
+# Human-readable description of the crate. Essential for crates.io search discoverability.
+description = "FLUX compression — high-ratio content-aware solid archiving library"
+# Public repository URL where the source code and development history are hosted.
+repository = "https://github.com/acydd/flux"
+# Licensing terms. Dual licensed under GPL-3.0 and Commercial terms.
+license = "GPL-3.0-only OR Commercial"
+# Keywords to categorize this crate on crates.io, improving indexing search results.
+keywords = ["compression", "archive", "encryption", "flux", "adaptive"]
+# Official registry categories to classify the crate. Helps users find it via catalog browsing.
+categories = ["compression", "cryptography"]
+# Path to the library's Markdown readme which is rendered directly on the crates.io landing page.
+readme = "README.md"
+# Authors of the library wrapper.
+authors = ["FLUX Contributors"]
+
+[dependencies]
+# The underlying core compression engine implementing circular buffer, entropy mix, and GCM encryption.
+flux-core = { path = "../flux-core" }
+# Raw low-level FFI bindings (extern declaration definitions) used to interface with the core library.
+flux-sys = { path = "../flux-sys" }
+# Temporary file/directory management used during archive verification checks.
+tempfile = "3.8"

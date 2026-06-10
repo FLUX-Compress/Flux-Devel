@@ -1,0 +1,42 @@
+# Cargo configuration for the FLUX GUI Application.
+[package]
+# The name of the crate.
+name = "flux-gui"
+# The version of the GUI wrapper.
+version = "1.2.0"
+# Rust edition to use for compilation.
+edition = "2021"
+# A brief description of the crate.
+description = "FLUX compression — GUI application"
+# Authors of the application.
+authors = ["FLUX Contributors"]
+# License under which the GUI is distributed.
+license = "GPL-3.0-only OR Commercial"
+
+[dependencies]
+# Safe high-level FLUX compression and archiving library.
+flux = { path = "../flux" }
+# Core compression library for internal FFI access and cryptography verification.
+flux-core = { path = "../flux-core" }
+# GUI framework wrapper for native desktop app development.
+eframe = { version = "0.27", features = ["default"] }
+# The egui UI layout and widget library.
+egui = "0.27"
+# Extra utilities for egui (e.g. layout tables or animations).
+egui_extras = "0.27"
+# Native system file and folder dialogs.
+rfd = "0.14"
+# Async runtime used to spawn compression operations in background threads.
+tokio = { version = "1.35", features = ["rt", "rt-multi-thread"] }
+# OS standard config directory resolution utility.
+directories = "5.0"
+# Serialization/deserialization framework.
+serde = { version = "1.0", features = ["derive"] }
+# JSON serialization support for loading/saving settings.
+serde_json = "1.0"
+# System information library used to query memory specs for settings display.
+sysinfo = "0.30"
+
+[build-dependencies]
+# For embedding Windows resources like icons and high-DPI manifests.
+embed-resource = "2.4"
