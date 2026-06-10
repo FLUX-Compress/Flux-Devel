@@ -11,8 +11,8 @@ pub const FLUX_MAGIC: [u8; 4] = *b"FLUX";
 /// Major version number of the FLUX format.
 pub const FLUX_VERSION_MAJOR: u16 = 1;
 
-/// Minor version number of the FLUX format.
-pub const FLUX_VERSION_MINOR: u16 = 0;
+/// Minor version number of the FLUX format (bumped to 4 for BCJ executable filters support).
+pub const FLUX_VERSION_MINOR: u16 = 4;
 
 /// Plaintext bootstrap section of the FLUX Archive Header.
 ///

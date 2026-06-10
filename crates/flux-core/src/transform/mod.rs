@@ -51,10 +51,33 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod bcj;
 pub mod bwt;
 pub mod delta;
 pub mod filters;
 pub mod transpose;
+
+/// Errors returned when deserializing a TransformStack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransformDeserializationError {
+    /// The input byte slice is too short.
+    TooShort,
+    /// The media filter type code is not supported.
+    UnsupportedFilterType(u8),
+}
+
+impl std::fmt::Display for TransformDeserializationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TransformDeserializationError::TooShort => write!(f, "Data too short for TransformStack"),
+            TransformDeserializationError::UnsupportedFilterType(t) => {
+                write!(f, "Unsupported media filter type: {}", t)
+            }
+        }
+    }
+}
+
+impl std::error::Error for TransformDeserializationError {}
 
 /// Media-specific specialized filters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +104,8 @@ pub enum MediaFilterType {
         /// Mask byte storing delta_per_plane and min_match_per_plane decisions.
         mask: u8,
     },
+    /// BCJ filter for x86 executables (added in v1.4).
+    BcjX86,
 }
 
 /// Stores information about which transformations were applied to a block of data,
@@ -179,14 +204,19 @@ impl TransformStack {
                 buf.push(channels);
                 buf.push(mask);
             }
+            MediaFilterType::BcjX86 => {
+                buf.push(6);
+                buf.push(0);
+                buf.push(0);
+            }
         }
         buf
     }
 
     /// Deserializes a `TransformStack` from a byte slice.
-    pub fn deserialize(data: &[u8]) -> Result<(Self, &[u8]), String> {
+    pub fn deserialize(data: &[u8]) -> Result<(Self, &[u8]), TransformDeserializationError> {
         if data.len() < 13 {
-            return Err("Data too short for TransformStack".to_string());
+            return Err(TransformDeserializationError::TooShort);
         }
         let delta_applied = data[0] != 0;
         let delta_stride = data[1];
@@ -222,7 +252,12 @@ impl TransformStack {
                 channels: param1,
                 mask: param2,
             },
-            _ => return Err("Invalid media filter type".to_string()),
+            // 6 is BCJ x86 filter (introduced in v1.4).
+            // Newer/older readers handling is additive: if an archive does not use BCJ,
+            // older readers (v1.3) can still read it cleanly. If BCJ is used (media_type == 6),
+            // older readers will fail with an error mapped to ErrUnsupportedFormat.
+            6 => MediaFilterType::BcjX86,
+            _ => return Err(TransformDeserializationError::UnsupportedFilterType(media_type)),
         };
 
         Ok((
@@ -241,6 +276,7 @@ impl TransformStack {
             &data[13..],
         ))
     }
+
 
     /// Applies the transform stack in compression order:
     /// `Delta Filter` -> `Byte Plane Transpose` -> `BWT` -> `Media Filter`.
@@ -321,3 +357,53 @@ impl TransformStack {
         data
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_transform_stack_bcj_roundtrip() {
+        let ts = TransformStack {
+            delta_applied: true,
+            delta_stride: 4,
+            transpose_applied: true,
+            transpose_stride: 8,
+            bwt_applied: false,
+            bwt_primary_index: 0,
+            media_filter_applied: true,
+            media_filter_type: MediaFilterType::BcjX86,
+            ppm_applied: false,
+            ppm_arena_size: 0,
+        };
+
+        let serialized = ts.serialize();
+        assert_eq!(serialized.len(), 13);
+        assert_eq!(serialized[10], 6); // media filter type index should be 6
+        assert_eq!(serialized[11], 0);
+        assert_eq!(serialized[12], 0);
+
+        let (deserialized, remaining) = TransformStack::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized, ts);
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn test_transform_stack_deserialize_errors() {
+        // Too short
+        let data_short = vec![0u8; 12];
+        let res_short = TransformStack::deserialize(&data_short);
+        assert_eq!(res_short, Err(TransformDeserializationError::TooShort));
+
+        // Unsupported media filter type (e.g. 7)
+        let mut data_unsupported = vec![0u8; 13];
+        data_unsupported[9] = 1; // media_filter_applied = true
+        data_unsupported[10] = 7; // type code 7
+        let res_unsupported = TransformStack::deserialize(&data_unsupported);
+        assert_eq!(
+            res_unsupported,
+            Err(TransformDeserializationError::UnsupportedFilterType(7))
+        );
+    }
+}
+

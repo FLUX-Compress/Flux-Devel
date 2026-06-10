@@ -57,7 +57,7 @@ use buffer::circular::CircularBuffer;
 use compress::lz77::Lz77Token;
 use integrity::{Crc32Hasher, MultiLevelIntegrity, ParallelCrc32, Sha256Hasher};
 use std::cell::RefCell;
-use transform::TransformStack;
+use transform::{TransformStack, TransformDeserializationError};
 
 thread_local! {
     static TIMING_ENABLED: RefCell<bool> = const { RefCell::new(false) };
@@ -1941,6 +1941,9 @@ impl FluxDecompressor {
             .map_err(|e| ArchiveError::Io(e.to_string()))?;
         let start_header = crate::crypto::header::VolumeHeader::deserialize(&header_bytes)
             .map_err(|_| ArchiveError::HeaderCorrupt)?;
+        if start_header.version_major != 1 {
+            return Err(ArchiveError::UnsupportedVersion);
+        }
 
         let total_volumes = start_header.total_volumes;
         let archive_id = start_header.archive_id;
@@ -2144,6 +2147,10 @@ impl FluxDecompressor {
                 crate::crypto::header::PlaintextHeader::deserialize(&bootstrap_full)
                     .map_err(|_| ArchiveError::HeaderCorrupt)?;
 
+            if plaintext_header.version_major != 1 {
+                return Err(ArchiveError::UnsupportedVersion);
+            }
+
             let key = if plaintext_header.is_encrypted {
                 let pass = password_str.ok_or(ArchiveError::WrongPassword)?;
                 let k =
@@ -2233,6 +2240,9 @@ impl FluxDecompressor {
                 .map_err(|e| ArchiveError::Io(e.to_string()))?;
             let header_n = crate::crypto::header::VolumeHeader::deserialize(&hb)
                 .map_err(|_| ArchiveError::HeaderCorrupt)?;
+            if header_n.version_major != 1 {
+                return Err(ArchiveError::UnsupportedVersion);
+            }
 
             if header_n.volume_index_offset == 0 {
                 return Err(ArchiveError::CorruptIndex);
@@ -2443,7 +2453,10 @@ impl FluxDecompressor {
                 let mut compressed_hash = [0u8; 32];
                 compressed_hash.copy_from_slice(&header_slice[21..53]);
                 let (_transform_stack, _) = TransformStack::deserialize(&header_slice[53..66])
-                    .map_err(|_| ArchiveError::CorruptBlock(block_id))?;
+                    .map_err(|e| match e {
+                        TransformDeserializationError::UnsupportedFilterType(_) => ArchiveError::UnsupportedVersion,
+                        _ => ArchiveError::CorruptBlock(block_id),
+                    })?;
 
                 let block_type = match b_type_tag {
                     0 => archive::format::BlockType::Text,
@@ -2494,7 +2507,10 @@ impl FluxDecompressor {
                     ) as usize;
                     let (sub_transform_stack, _) =
                         TransformStack::deserialize(&decrypted_payload[sub_pos + 8..sub_pos + 21])
-                            .map_err(|_| ArchiveError::CorruptBlock(block_id))?;
+                            .map_err(|e| match e {
+                                TransformDeserializationError::UnsupportedFilterType(_) => ArchiveError::UnsupportedVersion,
+                                _ => ArchiveError::CorruptBlock(block_id),
+                            })?;
 
                     sub_pos += 21;
 
@@ -2663,7 +2679,10 @@ impl FluxDecompressor {
                 let mut compressed_hash = [0u8; 32];
                 compressed_hash.copy_from_slice(&header_slice[21..53]);
                 let (_transform_stack, _) = TransformStack::deserialize(&header_slice[53..66])
-                    .map_err(|_| ArchiveError::CorruptBlock(block_id))?;
+                    .map_err(|e| match e {
+                        TransformDeserializationError::UnsupportedFilterType(_) => ArchiveError::UnsupportedVersion,
+                        _ => ArchiveError::CorruptBlock(block_id),
+                    })?;
 
                 let block_type = match b_type_tag {
                     0 => archive::format::BlockType::Text,
@@ -2707,7 +2726,10 @@ impl FluxDecompressor {
                     ) as usize;
                     let (sub_transform_stack, _) =
                         TransformStack::deserialize(&decrypted_payload[sub_pos + 8..sub_pos + 21])
-                            .map_err(|_| ArchiveError::CorruptBlock(block_id))?;
+                            .map_err(|e| match e {
+                                TransformDeserializationError::UnsupportedFilterType(_) => ArchiveError::UnsupportedVersion,
+                                _ => ArchiveError::CorruptBlock(block_id),
+                            })?;
 
                     sub_pos += 21;
 

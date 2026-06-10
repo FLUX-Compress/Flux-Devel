@@ -747,6 +747,11 @@ pub fn apply_filter(filter_type: MediaFilterType, data: &[u8]) -> (Vec<u8>, Medi
                 },
             )
         }
+        MediaFilterType::BcjX86 => {
+            let mut out = data.to_vec();
+            crate::transform::bcj::bcj_x86_forward(&mut out);
+            (out, filter_type)
+        }
     }
 }
 
@@ -764,12 +769,34 @@ pub fn reverse_filter(filter_type: MediaFilterType, data: &[u8]) -> Vec<u8> {
         MediaFilterType::FloatChannelSplit { channels, mask } => {
             FloatChannelSplitFilter::new(channels, mask).reverse(data)
         }
+        MediaFilterType::BcjX86 => {
+            let mut out = data.to_vec();
+            crate::transform::bcj::bcj_x86_inverse(&mut out);
+            out
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_bcj_filter_dispatch() {
+        let original = vec![
+            0x55,
+            0x89, 0xE5,
+            0xE8, 0x20, 0x00, 0x00, 0x00,
+            0x5D,
+            0xC3,
+        ];
+        let (filtered, filter_type) = apply_filter(MediaFilterType::BcjX86, &original);
+        assert_eq!(filter_type, MediaFilterType::BcjX86);
+        assert_ne!(filtered, original);
+
+        let reversed = reverse_filter(filter_type, &filtered);
+        assert_eq!(reversed, original);
+    }
 
     #[test]
     fn test_audio_delta_roundtrip() {
