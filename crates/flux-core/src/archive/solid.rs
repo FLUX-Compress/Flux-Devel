@@ -124,6 +124,7 @@ impl SolidBlockGrouper {
                         ContentType::Text => BlockType::Text,
                         ContentType::Multimedia => BlockType::Multimedia,
                         ContentType::Binary => BlockType::Binary,
+                        ContentType::Executable => BlockType::Binary,
                         ContentType::Incompressible => BlockType::Raw,
                     }
                 }

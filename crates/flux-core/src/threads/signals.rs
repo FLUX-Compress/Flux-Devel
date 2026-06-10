@@ -15,6 +15,8 @@ pub enum ContentType {
     Multimedia,
     /// Pre-compressed data, encrypted files, or random noise.
     Incompressible,
+    /// x86 and x86-64 executable binary code (added in v1.4).
+    Executable,
 }
 
 /// The suggested pipeline pathway for compressing a block.

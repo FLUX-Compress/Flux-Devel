@@ -5,6 +5,7 @@
 //! Designed to allow transparent replacement with a trained machine learning model (ML) in V2.
 
 use super::entropy::EntropyEstimator;
+use super::executable_detect::{is_elf_x86_or_x64, is_mach_o_x86_or_x64, is_pe_x86_or_x64};
 use crate::threads::signals::{CompressionPipeline, ContentType};
 
 /// Represents the classification decisions and parameter bundle produced by the classifier.
@@ -136,6 +137,17 @@ impl ContentClassifier {
     ///   LZ77 dictionary matching combined with fallback PPM models works best here. Routed to `BinaryPipeline`.
     /// * **Extreme Entropy (> 7.95)**: Uniform noise indicating encryption or maximum compression. Routed to `StoreRaw`.
     pub fn classify(&mut self, data: &[u8]) -> ClassificationResult {
+        if is_pe_x86_or_x64(data) || is_elf_x86_or_x64(data) || is_mach_o_x86_or_x64(data) {
+            return ClassificationResult {
+                content_type: ContentType::Executable,
+                pipeline: CompressionPipeline::BinaryPipeline,
+                stride_hint: None,
+                window_size_recommendation: 262_144,
+                confidence: 0.95,
+                estimated_ratio: 0.7,
+            };
+        }
+
         if data.len() < 64_536 {
             return self.classify_small_file(data);
         }
@@ -340,6 +352,17 @@ impl ContentClassifier {
     ///
     /// Skips complex analyzer calculations (such as ML and heavy correlation scans) to execute in microseconds.
     pub fn classify_small_file(&mut self, data: &[u8]) -> ClassificationResult {
+        if is_pe_x86_or_x64(data) || is_elf_x86_or_x64(data) || is_mach_o_x86_or_x64(data) {
+            return ClassificationResult {
+                content_type: ContentType::Executable,
+                pipeline: CompressionPipeline::BinaryPipeline,
+                stride_hint: None,
+                window_size_recommendation: 262_144,
+                confidence: 0.95,
+                estimated_ratio: 0.7,
+            };
+        }
+
         let sig = self.detect_magic_bytes(data);
         self.entropy_estimator.reset();
         self.entropy_estimator.update(data);
@@ -576,5 +599,219 @@ mod tests {
         let res = classifier.classify_small_file(&wav_data);
         assert_eq!(res.content_type, ContentType::Multimedia);
         assert_eq!(res.pipeline, CompressionPipeline::MultimediaPipeline);
+    }
+
+    #[test]
+    fn test_executable_pe_detection() {
+        let mut classifier = ContentClassifier::new();
+
+        // 1. Positive case: valid PE signature
+        // Must be >= 64 bytes. We write MZ at 0, offset 0x3C points to PE\0\0.
+        let mut pe_data = vec![0u8; 128];
+        pe_data[0] = 0x4D;
+        pe_data[1] = 0x5A;
+        // Let's set offset of PE header to 0x40 (64)
+        pe_data[0x3C] = 0x40;
+        pe_data[0x3D] = 0x00;
+        pe_data[0x3E] = 0x00;
+        pe_data[0x3F] = 0x00;
+        // At 0x40: "PE\0\0"
+        pe_data[0x40] = 0x50;
+        pe_data[0x41] = 0x45;
+        pe_data[0x42] = 0x00;
+        pe_data[0x43] = 0x00;
+
+        let res = classifier.classify_small_file(&pe_data);
+        assert_eq!(res.content_type, ContentType::Executable);
+        assert_eq!(res.pipeline, CompressionPipeline::BinaryPipeline);
+
+        // 2. Negative case: MZ but junk PE offset
+        let mut pe_junk = vec![0u8; 128];
+        pe_junk[0] = 0x4D;
+        pe_junk[1] = 0x5A;
+        // Offset points to 0x40, but there's junk there
+        pe_junk[0x3C] = 0x40;
+        pe_junk[0x40] = 0x46; // 'F'
+        pe_junk[0x41] = 0x4F; // 'O'
+        pe_junk[0x42] = 0x4F; // 'O'
+        pe_junk[0x43] = 0x00;
+        let res_junk = classifier.classify_small_file(&pe_junk);
+        assert_ne!(res_junk.content_type, ContentType::Executable);
+
+        // 3. Negative case: too short buffer (less than 64 bytes)
+        let mut pe_short = vec![0u8; 32];
+        pe_short[0] = 0x4D;
+        pe_short[1] = 0x5A;
+        let res_short = classifier.classify_small_file(&pe_short);
+        assert_ne!(res_short.content_type, ContentType::Executable);
+    }
+
+    #[test]
+    fn test_executable_elf_detection() {
+        let mut classifier = ContentClassifier::new();
+
+        // 1. Positive case: ELF32, little-endian, machine type x86
+        let mut elf32_x86 = vec![0u8; 32];
+        elf32_x86[0] = 0x7F;
+        elf32_x86[1] = 0x45;
+        elf32_x86[2] = 0x4C;
+        elf32_x86[3] = 0x46;
+        elf32_x86[4] = 1; // ELF32
+        elf32_x86[5] = 1; // Little-endian
+        elf32_x86[18] = 0x03; // x86 machine type LE: 0x0003
+        elf32_x86[19] = 0x00;
+
+        let res = classifier.classify_small_file(&elf32_x86);
+        assert_eq!(res.content_type, ContentType::Executable);
+        assert_eq!(res.pipeline, CompressionPipeline::BinaryPipeline);
+
+        // 2. Positive case: ELF64, little-endian, machine type x86-64
+        let mut elf64_x86_64 = vec![0u8; 32];
+        elf64_x86_64[0] = 0x7F;
+        elf64_x86_64[1] = 0x45;
+        elf64_x86_64[2] = 0x4C;
+        elf64_x86_64[3] = 0x46;
+        elf64_x86_64[4] = 2; // ELF64
+        elf64_x86_64[5] = 1; // Little-endian
+        elf64_x86_64[18] = 0x3E; // x86-64 machine type LE: 0x003E
+        elf64_x86_64[19] = 0x00;
+
+        let res = classifier.classify_small_file(&elf64_x86_64);
+        assert_eq!(res.content_type, ContentType::Executable);
+
+        // 3. Negative case: ELF with ARM machine type (0x0028 LE / 0x00B7 LE)
+        let mut elf_arm = vec![0u8; 32];
+        elf_arm[0] = 0x7F;
+        elf_arm[1] = 0x45;
+        elf_arm[2] = 0x4C;
+        elf_arm[3] = 0x46;
+        elf_arm[4] = 2;
+        elf_arm[5] = 1;
+        elf_arm[18] = 0x28; // ARM
+        elf_arm[19] = 0x00;
+
+        let res = classifier.classify_small_file(&elf_arm);
+        assert_ne!(res.content_type, ContentType::Executable);
+
+        // 4. Negative case: too short buffer (less than 20 bytes)
+        let mut elf_short = vec![0u8; 10];
+        elf_short[0] = 0x7F;
+        elf_short[1] = 0x45;
+        elf_short[2] = 0x4C;
+        elf_short[3] = 0x46;
+        let res = classifier.classify_small_file(&elf_short);
+        assert_ne!(res.content_type, ContentType::Executable);
+    }
+
+    #[test]
+    fn test_executable_macho_detection() {
+        let mut classifier = ContentClassifier::new();
+
+        // 1. Positive case: Mach-O 64-bit LE, CPU type x86-64 (0x01000007 LE: 07 00 00 01)
+        let mut macho_x64 = vec![0u8; 16];
+        macho_x64[0] = 0xCF;
+        macho_x64[1] = 0xFA;
+        macho_x64[2] = 0xED;
+        macho_x64[3] = 0xFE;
+        macho_x64[4] = 0x07;
+        macho_x64[5] = 0x00;
+        macho_x64[6] = 0x00;
+        macho_x64[7] = 0x01;
+
+        let res = classifier.classify_small_file(&macho_x64);
+        assert_eq!(res.content_type, ContentType::Executable);
+
+        // 2. Negative case: Mach-O with non-x86 CPU type (e.g. ARM64: 0x0100000C LE: 0C 00 00 01)
+        let mut macho_arm = vec![0u8; 16];
+        macho_arm[0] = 0xCF;
+        macho_arm[1] = 0xFA;
+        macho_arm[2] = 0xED;
+        macho_arm[3] = 0xFE;
+        macho_arm[4] = 0x0C;
+        macho_arm[5] = 0x00;
+        macho_arm[6] = 0x00;
+        macho_arm[7] = 0x01;
+
+        let res = classifier.classify_small_file(&macho_arm);
+        assert_ne!(res.content_type, ContentType::Executable);
+
+        // 3. Negative case: too short buffer (less than 8 bytes)
+        let mut macho_short = vec![0u8; 6];
+        macho_short[0] = 0xCF;
+        macho_short[1] = 0xFA;
+        macho_short[2] = 0xED;
+        macho_short[3] = 0xFE;
+        let res = classifier.classify_small_file(&macho_short);
+        assert_ne!(res.content_type, ContentType::Executable);
+    }
+
+    #[test]
+    fn test_executable_false_positives() {
+        let mut classifier = ContentClassifier::new();
+
+        // 1. Coincidental MZ but no PE header
+        let mut fake_mz = vec![0u8; 100];
+        fake_mz[0] = 0x4D; // 'M'
+        fake_mz[1] = 0x5A; // 'Z'
+        // Fill rest with random or zeros
+        let res = classifier.classify_small_file(&fake_mz);
+        assert_ne!(res.content_type, ContentType::Executable);
+
+        // 2. All zeros buffer
+        let zeros = vec![0u8; 128];
+        let res = classifier.classify_small_file(&zeros);
+        assert_ne!(res.content_type, ContentType::Executable);
+    }
+
+    #[test]
+    fn test_executable_smoke_and_byte_identity() {
+        use crate::{FluxCompressionLevel, FluxCompressor, FluxDecompressor, FluxOptions};
+        use tempfile::tempdir;
+
+        let temp_src = tempdir().unwrap();
+        let temp_dest_a = tempdir().unwrap();
+
+        // Create a PE file
+        let pe_path = temp_src.path().join("test_exec.exe");
+        let mut pe_data = vec![0u8; 1024];
+        pe_data[0] = 0x4D;
+        pe_data[1] = 0x5A;
+        pe_data[0x3C] = 0x40;
+        pe_data[0x40] = 0x50;
+        pe_data[0x41] = 0x45;
+        for (i, val) in pe_data.iter_mut().enumerate().skip(68) {
+            *val = (i % 251) as u8;
+        }
+        std::fs::write(&pe_path, &pe_data).unwrap();
+
+        // Create a normal text file
+        let txt_path = temp_src.path().join("test_text.txt");
+        let txt_data = b"This is a repeated text block. This is a repeated text block. This is a repeated text block.";
+        std::fs::write(&txt_path, txt_data).unwrap();
+
+        // Compress
+        let archive_a = temp_src.path().join("archive_a.flx");
+        let options = FluxOptions {
+            level: FluxCompressionLevel::Balanced,
+            password: std::ptr::null(),
+            thread_count: 0,
+            block_size: 0,
+            volume_size: 0,
+        };
+        let mut compressor = FluxCompressor::new(options);
+        let c_stats = compressor.compress_directory(temp_src.path(), &archive_a).unwrap();
+        assert!(c_stats.original_size > 0);
+
+        // Decompress
+        let mut decompressor = FluxDecompressor::new(options);
+        let d_stats = decompressor.decompress(&archive_a, temp_dest_a.path()).unwrap();
+        assert_eq!(d_stats.files_extracted, 2);
+        assert!(d_stats.integrity_verified);
+
+        // Verify the extracted files are byte-perfect
+        let dec_pe_data = std::fs::read(temp_dest_a.path().join("test_exec.exe")).unwrap();
+        assert_eq!(dec_pe_data, pe_data);
+        let dec_txt_data = std::fs::read(temp_dest_a.path().join("test_text.txt")).unwrap();
+        assert_eq!(dec_txt_data, txt_data);
     }
 }

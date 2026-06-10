@@ -91,8 +91,10 @@ pub mod backwards;
 pub mod classifier;
 pub mod entropy;
 pub mod stride;
+pub mod executable_detect;
 
 pub use backwards::BackwardsAnalyzer;
 pub use classifier::{ClassificationResult, ContentClassifier, FileSignature};
 pub use entropy::EntropyEstimator;
 pub use stride::{AnalysisMode, StrideCandidate, StrideDetector};
+
