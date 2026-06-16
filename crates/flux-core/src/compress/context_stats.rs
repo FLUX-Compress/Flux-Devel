@@ -65,6 +65,20 @@ pub fn evaluate_clustering_cost(
     total_cost
 }
 
+/// Computes the bit cost of encoding all literals using a single legacy frequency table.
+///
+/// Note: To remain unit-consistent with the relative overhead model in `decide_context_coding`
+/// (which uses `(K - 1) * 512` bytes of table overhead to measure extra overhead above the baseline),
+/// this function returns JUST the absolute Shannon entropy coding cost in fixed-point bits,
+/// with no table overhead added.
+#[allow(dead_code)]
+pub(crate) fn legacy_single_table_cost(
+    literals_with_context: &[(u8, u8)],
+) -> u64 {
+    let histograms = gather_context_stats(literals_with_context, ContextMode::None);
+    cluster_entropy_times_n(&histograms[0])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +198,37 @@ mod tests {
 
         assert_eq!(cost1, cost2);
         assert_eq!(cost2, cost3);
+    }
+
+    #[test]
+    fn test_legacy_cost_determinism() {
+        let mut input = Vec::new();
+        for i in 0..100 {
+            input.push(((i % 256) as u8, 0x10));
+        }
+        let cost1 = legacy_single_table_cost(&input);
+        let cost2 = legacy_single_table_cost(&input);
+        let cost3 = legacy_single_table_cost(&input);
+        assert_eq!(cost1, cost2);
+        assert_eq!(cost2, cost3);
+    }
+
+    #[test]
+    fn test_legacy_cost_empty_input() {
+        let cost = legacy_single_table_cost(&[]);
+        assert_eq!(cost, 0);
+    }
+
+    #[test]
+    fn test_legacy_cost_uniform() {
+        // Uniform distribution of all 256 symbols appearing exactly once.
+        let mut input = Vec::new();
+        for i in 0..256 {
+            input.push((i as u8, 0));
+        }
+        let cost = legacy_single_table_cost(&input);
+        // Shannon entropy of uniform distribution over 256 symbols is exactly 8 bits per symbol.
+        // In 16.16 fixed point: 256 symbols * 8 bits/symbol * 65536 = 134,217,728.
+        assert_eq!(cost, 134_217_728);
     }
 }

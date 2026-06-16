@@ -57,3 +57,32 @@ pub mod context;
 pub mod clustering;
 pub mod context_stats;
 pub mod context_decide;
+pub mod literal_emit;
+
+
+/// v1.5 feature gate: enable context-mapped literal
+/// coding in the encoder. Currently disabled; will be
+/// enabled by default once Chunk C lands the decoder.
+/// Encoded archives are NOT decodable until C ships.
+#[allow(dead_code)]
+pub(crate) const ENABLE_CONTEXT_LITERALS: bool = false;
+
+use std::cell::Cell;
+
+thread_local! {
+    static CONTEXT_LITERALS_OVERRIDE: Cell<Option<bool>>
+        = const { Cell::new(None) };
+}
+
+#[allow(dead_code)]
+pub(crate) fn context_literals_enabled() -> bool {
+    CONTEXT_LITERALS_OVERRIDE.with(|c| c.get())
+        .unwrap_or(ENABLE_CONTEXT_LITERALS)
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn override_context_literals(value: Option<bool>) {
+    CONTEXT_LITERALS_OVERRIDE.with(|c| c.set(value));
+}
+

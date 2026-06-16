@@ -589,6 +589,7 @@ impl FluxCompressor {
         let mut compressed_total_size = 0u64;
         let mut original_total_size = 0u64;
         let mut bcj_applied = false;
+        let mut context_literals_applied = false;
 
         // Front File Index position
         let front_index_offset = file
@@ -874,6 +875,10 @@ impl FluxCompressor {
                 transform_stack.ppm_applied = false;
                 transform_stack.ppm_arena_size = 0;
 
+                if diag.uses_context_coding {
+                    context_literals_applied = true;
+                }
+
                 if is_analyze_enabled() {
                     file_diagnostics.merge(&diag);
                 }
@@ -1049,14 +1054,21 @@ impl FluxCompressor {
             .map_err(|e| ArchiveError::Io(e.to_string()))?;
         add_write_time(write_start.elapsed().as_secs_f64());
 
-        // Rewrite the Plaintext Header to set version_minor = 4 if BCJ was applied
-        if bcj_applied {
-            let mut plaintext_header_v14 = plaintext_header.clone();
-            plaintext_header_v14.version_minor = 4;
+        // Rewrite the Plaintext Header to set version_minor if BCJ or context literals were applied
+        let version_minor = if context_literals_applied {
+            5
+        } else if bcj_applied {
+            4
+        } else {
+            0
+        };
+        if version_minor > 0 {
+            let mut plaintext_header_final = plaintext_header.clone();
+            plaintext_header_final.version_minor = version_minor;
             let write_start = std::time::Instant::now();
             file.seek(SeekFrom::Start(0))
                 .map_err(|e| ArchiveError::Io(e.to_string()))?;
-            file.write_all(&plaintext_header_v14.serialize())
+            file.write_all(&plaintext_header_final.serialize())
                 .map_err(|e| ArchiveError::Io(e.to_string()))?;
             add_write_time(write_start.elapsed().as_secs_f64());
         }
@@ -1229,6 +1241,7 @@ impl FluxCompressor {
         let mut compressed_total_size = 0u64;
         let mut original_total_size = 0u64;
         let mut bcj_applied = false;
+        let mut context_literals_applied = false;
 
         let mut volume_index = crate::crypto::header::VolumeIndex::default();
 
@@ -1458,6 +1471,10 @@ impl FluxCompressor {
                 transform_stack.ppm_applied = false;
                 transform_stack.ppm_arena_size = 0;
 
+                if diag.uses_context_coding {
+                    context_literals_applied = true;
+                }
+
                 if is_analyze_enabled() {
                     file_diagnostics.merge(&diag);
                 }
@@ -1658,9 +1675,9 @@ impl FluxCompressor {
                 .write_all(&header_payload)
                 .map_err(|e| ArchiveError::Io(e.to_string()))?;
 
-            // 9. Rewrite the Plaintext Header at offset 50 to write version_minor = 3
+            // 9. Rewrite the Plaintext Header at offset 50 to write version_minor
             let mut plaintext_header_v13 = plaintext_header.clone();
-            plaintext_header_v13.version_minor = 3;
+            plaintext_header_v13.version_minor = if context_literals_applied { 5 } else if bcj_applied { 4 } else { 3 };
             file_1
                 .seek(SeekFrom::Start(50))
                 .map_err(|e| ArchiveError::Io(e.to_string()))?;
@@ -1687,7 +1704,7 @@ impl FluxCompressor {
             let header_1 = crate::crypto::header::VolumeHeader {
                 magic: *b"FLXV",
                 version_major: 1,
-                version_minor: if bcj_applied { 4 } else { 3 },
+                version_minor: if context_literals_applied { 5 } else if bcj_applied { 4 } else { 3 },
                 volume_number: 1,
                 total_volumes: 1,
                 archive_id: writer.archive_id,
@@ -1809,7 +1826,7 @@ impl FluxCompressor {
             let header_n = crate::crypto::header::VolumeHeader {
                 magic: *b"FLXV",
                 version_major: 1,
-                version_minor: if bcj_applied { 4 } else { 3 },
+                version_minor: if context_literals_applied { 5 } else if bcj_applied { 4 } else { 3 },
                 volume_number: n,
                 total_volumes: n,
                 archive_id: writer.archive_id,
@@ -1869,7 +1886,7 @@ impl FluxCompressor {
 
             // 9. Rewrite the Plaintext Header at offset 50 to write version_minor
             let mut plaintext_header_final = plaintext_header.clone();
-            plaintext_header_final.version_minor = if bcj_applied { 4 } else { 3 };
+            plaintext_header_final.version_minor = if context_literals_applied { 5 } else if bcj_applied { 4 } else { 3 };
             file_1
                 .seek(SeekFrom::Start(50))
                 .map_err(|e| ArchiveError::Io(e.to_string()))?;
@@ -1895,7 +1912,7 @@ impl FluxCompressor {
             let header_1 = crate::crypto::header::VolumeHeader {
                 magic: *b"FLXV",
                 version_major: 1,
-                version_minor: if bcj_applied { 4 } else { 3 },
+                version_minor: if context_literals_applied { 5 } else if bcj_applied { 4 } else { 3 },
                 volume_number: 1,
                 total_volumes: n,
                 archive_id: writer.archive_id,
@@ -3070,7 +3087,7 @@ fn compress_block(
             let ppm_applied = false;
             let ppm_arena_size = 0;
             let (output, diag) =
-                serialize_lz77_tokens(&tokens, media_filter, data, ppm_applied, ppm_arena_size);
+                serialize_lz77_tokens(&tokens, media_filter, data, ppm_applied, ppm_arena_size, block_type, level);
             add_lz77_time(lz77_start.elapsed().as_secs_f64());
 
             (output, block_type, diag)
@@ -3194,6 +3211,7 @@ struct StreamDiagnostics {
     lengths_raw: Vec<u8>,
     slots_raw: Vec<u8>,
     rep_indices_raw: Vec<u8>,
+    uses_context_coding: bool,
 }
 
 impl StreamDiagnostics {
@@ -3215,6 +3233,7 @@ impl StreamDiagnostics {
         self.slots_raw.extend_from_slice(&other.slots_raw);
         self.rep_indices_raw
             .extend_from_slice(&other.rep_indices_raw);
+        self.uses_context_coding |= other.uses_context_coding;
     }
 }
 
@@ -3545,15 +3564,40 @@ impl<'a> TwoBitReader<'a> {
     }
 }
 
+fn block_type_allows_context(
+    block_type: crate::archive::format::BlockType,
+    media_filter: &transform::MediaFilterType,
+) -> bool {
+    if block_type != crate::archive::format::BlockType::Text
+        && block_type != crate::archive::format::BlockType::Binary
+        && block_type != crate::archive::format::BlockType::Mixed
+    {
+        return false;
+    }
+
+    match media_filter {
+        transform::MediaFilterType::None => true,
+        transform::MediaFilterType::BcjX86 => true,
+        transform::MediaFilterType::AudioDelta { .. }
+        | transform::MediaFilterType::FloatSplit
+        | transform::MediaFilterType::RgbSplit
+        | transform::MediaFilterType::RgbaDelta
+        | transform::MediaFilterType::FloatChannelSplit { .. } => false,
+    }
+}
+
 fn serialize_lz77_tokens(
     tokens: &[Lz77Token],
     media_filter: &transform::MediaFilterType,
     data: &[u8],
     ppm_applied: bool,
     ppm_arena_size: usize,
+    block_type: crate::archive::format::BlockType,
+    level: FluxCompressionLevel,
 ) -> (Vec<u8>, StreamDiagnostics) {
     let num_tokens = tokens.len() as u32;
     let mut literals_stream = Vec::new();
+    let mut literals_with_context = Vec::new();
     let mut lengths_stream = Vec::new();
     let mut slots_stream = Vec::new();
     let mut rep_indices_stream = Vec::new();
@@ -3604,6 +3648,12 @@ fn serialize_lz77_tokens(
             Lz77Token::Literal(b) => {
                 flags_writer.write(0);
                 literals_stream.push(*b);
+                let prev_byte = if pos > 0 && pos - 1 < data.len() {
+                    data[pos - 1]
+                } else {
+                    0
+                };
+                literals_with_context.push((*b, prev_byte));
                 pos += 1;
             }
             Lz77Token::Match { distance, length } => {
@@ -3648,11 +3698,6 @@ fn serialize_lz77_tokens(
     add_freq_table_time(freq_start.elapsed().as_secs_f64());
 
     let flags_table_bytes = serialize_frequency_table(&flags_table);
-    let literals_table_bytes = if ppm_applied {
-        Vec::new()
-    } else {
-        serialize_frequency_table(&literals_table)
-    };
     let lengths_table_bytes = serialize_frequency_table(&lengths_table);
     let slots_table_bytes = serialize_frequency_table(&slots_table);
     let rep_indices_table_bytes = serialize_frequency_table(&rep_indices_table);
@@ -3660,33 +3705,61 @@ fn serialize_lz77_tokens(
     let rans_start = std::time::Instant::now();
     let flags_encoded = rans_encode_stream(&flags_stream, &flags_table);
 
-    let literals_encoded = if ppm_applied {
-        let mut ppm = crate::compress::ppm::PpmModel::new(ppm_arena_size);
-        let mut ppm_events = Vec::new();
-        let mut pos = 0;
-        for token in tokens {
-            match token {
-                Lz77Token::Literal(b) => {
-                    ppm.encode_literal(*b, &mut ppm_events);
-                    pos += 1;
-                }
-                Lz77Token::Match { length, .. } | Lz77Token::RepMatch { length, .. } => {
-                    let len = *length as usize;
-                    for i in 0..len {
-                        ppm.update(data[pos + i]);
-                    }
-                    pos += len;
-                }
+    let mut uses_context_coding = false;
+    let mut literals_encoded = Vec::new();
+    let mut literals_table_bytes = Vec::new();
+
+    if crate::compress::context_literals_enabled()
+        && (level == FluxCompressionLevel::Maximum || level == FluxCompressionLevel::Extreme)
+        && block_type_allows_context(block_type, media_filter)
+        && !ppm_applied
+    {
+        let legacy_cost = crate::compress::context_stats::legacy_single_table_cost(&literals_with_context);
+        if let Some(metadata) = crate::compress::context_decide::decide_context_coding(&literals_with_context, legacy_cost) {
+            let mut out_lit = Vec::new();
+            if crate::compress::literal_emit::emit_context_coded_literals(&literals_with_context, &metadata, &mut out_lit).is_ok() {
+                literals_encoded = out_lit;
+                literals_table_bytes = Vec::new();
+                uses_context_coding = true;
             }
         }
-        let mut encoder = crate::compress::rans::RansEncoder::new();
-        for ev in ppm_events.iter().rev() {
-            encoder.encode_symbol_with_freq(ev.freq, ev.cumfreq);
-        }
-        encoder.flush()
-    } else {
-        rans_encode_stream(&literals_stream, &literals_table)
-    };
+    }
+
+    if !uses_context_coding {
+        literals_table_bytes = if ppm_applied {
+            Vec::new()
+        } else {
+            serialize_frequency_table(&literals_table)
+        };
+
+        literals_encoded = if ppm_applied {
+            let mut ppm = crate::compress::ppm::PpmModel::new(ppm_arena_size);
+            let mut ppm_events = Vec::new();
+            let mut pos = 0;
+            for token in tokens {
+                match token {
+                    Lz77Token::Literal(b) => {
+                        ppm.encode_literal(*b, &mut ppm_events);
+                        pos += 1;
+                    }
+                    Lz77Token::Match { length, .. } | Lz77Token::RepMatch { length, .. } => {
+                        let len = *length as usize;
+                        for i in 0..len {
+                            ppm.update(data[pos + i]);
+                        }
+                        pos += len;
+                    }
+                }
+            }
+            let mut encoder = crate::compress::rans::RansEncoder::new();
+            for ev in ppm_events.iter().rev() {
+                encoder.encode_symbol_with_freq(ev.freq, ev.cumfreq);
+            }
+            encoder.flush()
+        } else {
+            rans_encode_stream(&literals_stream, &literals_table)
+        };
+    }
 
     let lengths_encoded = rans_encode_stream(&lengths_stream, &lengths_table);
     let slots_encoded = rans_encode_stream(&slots_stream, &slots_table);
@@ -3702,7 +3775,7 @@ fn serialize_lz77_tokens(
     output.extend_from_slice(&(rep_indices_encoded.len() as u32).to_le_bytes());
 
     output.extend_from_slice(&flags_table_bytes);
-    if !ppm_applied {
+    if !ppm_applied && !uses_context_coding {
         output.extend_from_slice(&literals_table_bytes);
     }
     output.extend_from_slice(&lengths_table_bytes);
@@ -3738,6 +3811,7 @@ fn serialize_lz77_tokens(
         lengths_raw: lengths_stream,
         slots_raw: slots_stream,
         rep_indices_raw: rep_indices_stream,
+        uses_context_coding,
     };
 
     (output, diag)
@@ -4882,7 +4956,7 @@ mod tests {
         let ts = transform::TransformStack::default();
         for tokens in test_cases {
             let (serialized, _) =
-                serialize_lz77_tokens(&tokens, &ts.media_filter_type, &[0u8; 1000], false, 0);
+                serialize_lz77_tokens(&tokens, &ts.media_filter_type, &[0u8; 1000], false, 0, crate::archive::format::BlockType::Mixed, crate::ffi::FluxCompressionLevel::Balanced);
             let deserialized = deserialize_lz77_tokens(&serialized, &ts, 1000).unwrap();
             assert_eq!(tokens, deserialized);
         }
@@ -4924,7 +4998,7 @@ mod tests {
         let tokens = encoder.encode_with_media_filter(&transformed, &ts.media_filter_type);
 
         let (serialized, _) =
-            serialize_lz77_tokens(&tokens, &ts.media_filter_type, &transformed, false, 0);
+            serialize_lz77_tokens(&tokens, &ts.media_filter_type, &transformed, false, 0, crate::archive::format::BlockType::Mixed, crate::ffi::FluxCompressionLevel::Balanced);
         let deserialized_tokens =
             deserialize_lz77_tokens(&serialized, &ts, transformed.len()).unwrap();
 
@@ -5167,6 +5241,8 @@ mod tests {
             &transformed,
             true,
             ts.ppm_arena_size,
+            crate::archive::format::BlockType::Text,
+            crate::ffi::FluxCompressionLevel::Balanced,
         );
 
         let decompressed = decompress_block(
@@ -5335,5 +5411,226 @@ mod tests {
         }
 
         assert_eq!(restored_payload, original_concat);
+    }
+
+    fn create_test_exe_data() -> Vec<u8> {
+        let mut pe_data = vec![0u8; 10000];
+        // MZ signature
+        pe_data[0] = 0x4D;
+        pe_data[1] = 0x5A;
+        // PE header offset at 0x3C
+        pe_data[0x3C] = 0x40;
+        // PE header "PE\0\0"
+        pe_data[0x40] = 0x50;
+        pe_data[0x41] = 0x45;
+
+        // Fill with relative calls targeting a fixed absolute address (e.g. 0x12345678)
+        let target = 0x12345678i32;
+        let mut idx = 0x100;
+        while idx + 5 < pe_data.len() {
+            pe_data[idx] = 0xE8; // CALL opcode
+            let rel = target.wrapping_sub(idx as i32 + 5);
+            let bytes = rel.to_le_bytes();
+            pe_data[idx+1] = bytes[0];
+            pe_data[idx+2] = bytes[1];
+            pe_data[idx+3] = bytes[2];
+            pe_data[idx+4] = bytes[3];
+            idx += 16;
+        }
+        pe_data
+    }
+
+    fn create_test_exe_with_context_data() -> Vec<u8> {
+        let mut pe_data = create_test_exe_data();
+        let mut context_data = Vec::new();
+        for i in 0..200 {
+            let c1 = b'a' + (i % 26) as u8;
+            let c2 = b'A' + ((i / 26) % 26) as u8;
+            let lit3 = if (c2 & 1) == 0 { b'X' } else { b'Y' };
+            let lit4 = if lit3 == b'X' { b'1' } else { b'2' };
+            context_data.push(c1);
+            context_data.push(c2);
+            context_data.push(lit3);
+            context_data.push(lit4);
+        }
+        pe_data.extend_from_slice(&context_data);
+        pe_data
+    }
+
+    #[test]
+    fn test_context_coding_off_by_default() {
+        let temp_src = tempdir().unwrap();
+        let src_path = temp_src.path();
+        
+        let exe_path = src_path.join("file1.exe");
+        let exe_data = create_test_exe_with_context_data();
+        std::fs::write(&exe_path, exe_data).unwrap();
+
+        let archive_path = src_path.join("archive.flx");
+        let options = FluxOptions {
+            level: FluxCompressionLevel::Maximum,
+            password: std::ptr::null(),
+            thread_count: 0,
+            block_size: 0,
+            volume_size: 0,
+        };
+        let mut compressor = FluxCompressor::new(options);
+        compressor.compress_directory(src_path, &archive_path).unwrap();
+
+        let archive_bytes = std::fs::read(&archive_path).unwrap();
+        assert_eq!(archive_bytes[5], 4, "version_minor should be 4 (not 5) when context coding is off");
+    }
+
+    #[test]
+    fn test_context_coding_enabled_produces_v15() {
+        crate::compress::override_context_literals(Some(true));
+        
+        let temp_src = tempdir().unwrap();
+        let src_path = temp_src.path();
+        
+        let exe_path = src_path.join("file1.exe");
+        let exe_data = create_test_exe_with_context_data();
+        std::fs::write(&exe_path, exe_data).unwrap();
+
+        let archive_path = src_path.join("archive.flx");
+        let options = FluxOptions {
+            level: FluxCompressionLevel::Maximum,
+            password: std::ptr::null(),
+            thread_count: 0,
+            block_size: 0,
+            volume_size: 0,
+        };
+        let mut compressor = FluxCompressor::new(options);
+        compressor.compress_directory(src_path, &archive_path).unwrap();
+
+        crate::compress::override_context_literals(None);
+
+        let archive_bytes = std::fs::read(&archive_path).unwrap();
+        assert_eq!(archive_bytes[5], 5, "version_minor should be 5 when context coding is enabled and used");
+    }
+
+    #[test]
+    fn test_context_coding_enabled_skips_structured() {
+        crate::compress::override_context_literals(Some(true));
+
+        let temp_src = tempdir().unwrap();
+        let src_path = temp_src.path();
+        
+        let mut float_data = Vec::new();
+        for i in 0..1000 {
+            float_data.extend_from_slice(&(i as f32).to_le_bytes());
+        }
+        let txt_path = src_path.join("file1.bin");
+        std::fs::write(&txt_path, &float_data).unwrap();
+
+        let archive_path = src_path.join("archive.flx");
+        let options = FluxOptions {
+            level: FluxCompressionLevel::Maximum,
+            password: std::ptr::null(),
+            thread_count: 0,
+            block_size: 0,
+            volume_size: 0,
+        };
+        let mut compressor = FluxCompressor::new(options);
+        compressor.compress_directory(src_path, &archive_path).unwrap();
+
+        crate::compress::override_context_literals(None);
+
+        let archive_bytes = std::fs::read(&archive_path).unwrap();
+        assert_eq!(archive_bytes[5], 0, "version_minor should be 0 because context coding was skipped");
+    }
+
+    #[test]
+    fn test_context_coding_only_at_max_level() {
+        crate::compress::override_context_literals(Some(true));
+
+        let temp_src = tempdir().unwrap();
+        let src_path = temp_src.path();
+        
+        let exe_path = src_path.join("file1.exe");
+        let exe_data = create_test_exe_with_context_data();
+        std::fs::write(&exe_path, exe_data).unwrap();
+
+        let archive_path = src_path.join("archive.flx");
+        let options = FluxOptions {
+            level: FluxCompressionLevel::Balanced,
+            password: std::ptr::null(),
+            thread_count: 0,
+            block_size: 0,
+            volume_size: 0,
+        };
+        let mut compressor = FluxCompressor::new(options);
+        compressor.compress_directory(src_path, &archive_path).unwrap();
+
+        crate::compress::override_context_literals(None);
+
+        let archive_bytes = std::fs::read(&archive_path).unwrap();
+        assert_eq!(archive_bytes[5], 4, "version_minor should be 4 (BCJ only, no context coding at Balanced level)");
+    }
+
+    #[test]
+    fn test_context_coding_emit_structure() {
+        crate::compress::override_context_literals(Some(true));
+
+        let temp_src = tempdir().unwrap();
+        let src_path = temp_src.path();
+        
+        let exe_path = src_path.join("file1.exe");
+        let exe_data = create_test_exe_with_context_data();
+        std::fs::write(&exe_path, exe_data).unwrap();
+
+        let archive_path = src_path.join("archive.flx");
+        let options = FluxOptions {
+            level: FluxCompressionLevel::Maximum,
+            password: std::ptr::null(),
+            thread_count: 0,
+            block_size: 0,
+            volume_size: 0,
+        };
+        let mut compressor = FluxCompressor::new(options);
+        compressor.compress_directory(src_path, &archive_path).unwrap();
+
+        crate::compress::override_context_literals(None);
+
+        let archive_bytes = std::fs::read(&archive_path).unwrap();
+        
+        let ct_len = u32::from_le_bytes(archive_bytes[92..96].try_into().unwrap()) as usize;
+        let bootstrap_len = 96 + ct_len + 4;
+        let plaintext_header = crate::crypto::header::PlaintextHeader::deserialize(&archive_bytes[..bootstrap_len]).unwrap();
+        let p_len = bootstrap_len;
+        
+        let header_data_len = if plaintext_header.is_encrypted { 98 } else { 70 };
+        let encrypted_header = crate::crypto::header::EncryptedHeaderData::deserialize(&archive_bytes[p_len..p_len + header_data_len]).unwrap();
+        
+        let body_bytes = &archive_bytes[p_len + header_data_len + encrypted_header.file_index_size as usize..];
+        
+        let header_slice = &body_bytes[0..66];
+        let compressed_size = u64::from_le_bytes(header_slice[5..13].try_into().unwrap()) as usize;
+        let payload = &body_bytes[66..66 + compressed_size];
+        
+        let sub_compressed_size = u32::from_le_bytes(payload[4..8].try_into().unwrap()) as usize;
+        let sub_block_payload = &payload[21..21 + sub_compressed_size];
+        
+        let flags_len = u32::from_le_bytes(sub_block_payload[4..8].try_into().unwrap()) as usize;
+        let literals_len = u32::from_le_bytes(sub_block_payload[8..12].try_into().unwrap()) as usize;
+        
+        let lit_offset = 24 + 2048 + flags_len;
+        let lit_slice = &sub_block_payload[lit_offset..lit_offset + literals_len];
+        
+        let mode = lit_slice[0];
+        let num_tables = lit_slice[1];
+        
+        assert!(mode == 1 || mode == 2 || mode == 3);
+        assert!((2..=8).contains(&num_tables));
+        
+        let map_size = match mode {
+            1 => 256,
+            2 | 3 => 64,
+            _ => unreachable!(),
+        };
+        
+        for &t_idx in &lit_slice[2..2 + map_size] {
+            assert!(t_idx < num_tables);
+        }
     }
 }

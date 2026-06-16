@@ -98,6 +98,7 @@ pub fn decide_context_coding(
 }
 
 #[cfg(test)]
+#[allow(clippy::manual_is_multiple_of)]
 mod tests {
     use super::*;
     use crate::compress::context_stats::gather_context_stats;
