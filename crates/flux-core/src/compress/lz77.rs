@@ -232,6 +232,10 @@ pub struct Lz77Encoder {
     pub bt_left: Vec<u32>,
     /// Right children in the suffix BST.
     pub bt_right: Vec<u32>,
+    /// Whether context coding is allowed for this encoder run.
+    pub context_allowed: bool,
+    /// Cached context-mapped literal coding decision/metadata.
+    pub cached_context_metadata: Option<crate::compress::context::MultiTableMetadata>,
 }
 
 /// Returns the number of hash table address bits based on the window size.
@@ -296,6 +300,8 @@ impl Lz77Encoder {
             match_finder,
             bt_left: Vec::new(),
             bt_right: Vec::new(),
+            context_allowed: false,
+            cached_context_metadata: None,
         }
     }
 
@@ -426,6 +432,7 @@ impl Lz77Encoder {
     }
 
     pub fn encode(&mut self, data: &[u8]) -> Vec<Lz77Token> {
+        self.cached_context_metadata = None;
         if self.match_finder == MatchFinder::BinaryTree {
             self.encode_optimal(data)
         } else {
@@ -565,7 +572,37 @@ impl Lz77Encoder {
         } else {
             self.min_match_map.clone()
         };
-        let price_model = PriceModel::build(&provisional_tokens, data.len(), &min_match_map);
+        let mut price_model = PriceModel::build(&provisional_tokens, data.len(), &min_match_map);
+
+        if self.context_allowed {
+            let mut literals_with_context = Vec::with_capacity(provisional_tokens.len());
+            let mut pos = 0;
+            for token in &provisional_tokens {
+                match token {
+                    Lz77Token::Literal(b) => {
+                        let prev_byte = if pos > 0 && pos - 1 < data.len() {
+                            data[pos - 1]
+                        } else {
+                            0
+                        };
+                        literals_with_context.push((*b, prev_byte));
+                        pos += 1;
+                    }
+                    Lz77Token::Match { length, .. } | Lz77Token::RepMatch { length, .. } => {
+                        pos += *length as usize;
+                    }
+                }
+            }
+
+            let legacy_cost = crate::compress::context_stats::legacy_single_table_cost(&literals_with_context);
+            if let Some(metadata) = crate::compress::context_decide::decide_context_coding(&literals_with_context, legacy_cost) {
+                let histograms = crate::compress::context_stats::gather_context_stats(&literals_with_context, metadata.mode);
+                let avg_cost = crate::compress::context_stats::average_literal_cost(&histograms, &metadata.context_map, metadata.num_tables as usize);
+                let avg_cost_24_8 = (avg_cost >> 8) as u32;
+                price_model.literal_prices.fill(avg_cost_24_8);
+                self.cached_context_metadata = Some(metadata);
+            }
+        }
 
         // Reset the encoder state for Pass 2
         self.window.clear();

@@ -3077,7 +3077,10 @@ fn compress_block(
                     )
                 }
             };
+            lz77.context_allowed = crate::compress::context_literals_enabled()
+                && block_type_allows_context(block_type, media_filter);
             let tokens = lz77.encode_with_media_filter(data, media_filter);
+            let cached_metadata = lz77.cached_context_metadata.clone();
             // PPM (Order-4 context model) is implemented and available but
             // DISABLED by default. Measurement showed it gains only ~1% on
             // prose (literals are ~7% of output in our LZ77-first pipeline)
@@ -3087,7 +3090,7 @@ fn compress_block(
             let ppm_applied = false;
             let ppm_arena_size = 0;
             let (output, diag) =
-                serialize_lz77_tokens(&tokens, media_filter, data, ppm_applied, ppm_arena_size, block_type, level);
+                serialize_lz77_tokens(&tokens, media_filter, data, ppm_applied, ppm_arena_size, block_type, level, &cached_metadata);
             add_lz77_time(lz77_start.elapsed().as_secs_f64());
 
             (output, block_type, diag)
@@ -3586,14 +3589,16 @@ fn block_type_allows_context(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn serialize_lz77_tokens(
     tokens: &[Lz77Token],
     media_filter: &transform::MediaFilterType,
     data: &[u8],
     ppm_applied: bool,
     ppm_arena_size: usize,
-    block_type: crate::archive::format::BlockType,
-    level: FluxCompressionLevel,
+    _block_type: crate::archive::format::BlockType,
+    _level: FluxCompressionLevel,
+    context_metadata: &Option<crate::compress::context::MultiTableMetadata>,
 ) -> (Vec<u8>, StreamDiagnostics) {
     let num_tokens = tokens.len() as u32;
     let mut literals_stream = Vec::new();
@@ -3709,19 +3714,12 @@ fn serialize_lz77_tokens(
     let mut literals_encoded = Vec::new();
     let mut literals_table_bytes = Vec::new();
 
-    if crate::compress::context_literals_enabled()
-        && (level == FluxCompressionLevel::Maximum || level == FluxCompressionLevel::Extreme)
-        && block_type_allows_context(block_type, media_filter)
-        && !ppm_applied
-    {
-        let legacy_cost = crate::compress::context_stats::legacy_single_table_cost(&literals_with_context);
-        if let Some(metadata) = crate::compress::context_decide::decide_context_coding(&literals_with_context, legacy_cost) {
-            let mut out_lit = Vec::new();
-            if crate::compress::literal_emit::emit_context_coded_literals(&literals_with_context, &metadata, &mut out_lit).is_ok() {
-                literals_encoded = out_lit;
-                literals_table_bytes = Vec::new();
-                uses_context_coding = true;
-            }
+    if let Some(metadata) = context_metadata {
+        let mut out_lit = Vec::new();
+        if crate::compress::literal_emit::emit_context_coded_literals(&literals_with_context, metadata, &mut out_lit).is_ok() {
+            literals_encoded = out_lit;
+            literals_table_bytes = Vec::new();
+            uses_context_coding = true;
         }
     }
 
@@ -4956,7 +4954,7 @@ mod tests {
         let ts = transform::TransformStack::default();
         for tokens in test_cases {
             let (serialized, _) =
-                serialize_lz77_tokens(&tokens, &ts.media_filter_type, &[0u8; 1000], false, 0, crate::archive::format::BlockType::Mixed, crate::ffi::FluxCompressionLevel::Balanced);
+                serialize_lz77_tokens(&tokens, &ts.media_filter_type, &[0u8; 1000], false, 0, crate::archive::format::BlockType::Mixed, crate::ffi::FluxCompressionLevel::Balanced, &None);
             let deserialized = deserialize_lz77_tokens(&serialized, &ts, 1000).unwrap();
             assert_eq!(tokens, deserialized);
         }
@@ -4998,7 +4996,7 @@ mod tests {
         let tokens = encoder.encode_with_media_filter(&transformed, &ts.media_filter_type);
 
         let (serialized, _) =
-            serialize_lz77_tokens(&tokens, &ts.media_filter_type, &transformed, false, 0, crate::archive::format::BlockType::Mixed, crate::ffi::FluxCompressionLevel::Balanced);
+            serialize_lz77_tokens(&tokens, &ts.media_filter_type, &transformed, false, 0, crate::archive::format::BlockType::Mixed, crate::ffi::FluxCompressionLevel::Balanced, &None);
         let deserialized_tokens =
             deserialize_lz77_tokens(&serialized, &ts, transformed.len()).unwrap();
 
@@ -5243,6 +5241,7 @@ mod tests {
             ts.ppm_arena_size,
             crate::archive::format::BlockType::Text,
             crate::ffi::FluxCompressionLevel::Balanced,
+            &None,
         );
 
         let decompressed = decompress_block(
@@ -5632,5 +5631,105 @@ mod tests {
         for &t_idx in &lit_slice[2..2 + map_size] {
             assert!(t_idx < num_tables);
         }
+    }
+
+    #[test]
+    fn test_parser_with_context_no_crash() {
+        crate::compress::override_context_literals(Some(true));
+        
+        let temp_src = tempdir().unwrap();
+        let src_path = temp_src.path();
+        
+        let exe_path = src_path.join("file1.exe");
+        let exe_data = create_test_exe_with_context_data();
+        std::fs::write(&exe_path, exe_data).unwrap();
+
+        let temp_dest = tempdir().unwrap();
+        let archive_path = temp_dest.path().join("archive.flx");
+        let options = FluxOptions {
+            level: FluxCompressionLevel::Maximum,
+            password: std::ptr::null(),
+            thread_count: 0,
+            block_size: 0,
+            volume_size: 0,
+        };
+        let mut compressor = FluxCompressor::new(options);
+        let res = compressor.compress_directory(src_path, &archive_path);
+        assert!(res.is_ok());
+
+        crate::compress::override_context_literals(None);
+
+        let archive_bytes = std::fs::read(&archive_path).unwrap();
+        assert_eq!(archive_bytes[5], 5, "version_minor should be 5 when context coding is enabled and used");
+    }
+
+    #[test]
+    fn test_parser_context_off_byte_identical() {
+        crate::compress::override_context_literals(None);
+
+        let temp_src = tempdir().unwrap();
+        let src_path = temp_src.path();
+        
+        let exe_path = src_path.join("file1.exe");
+        let exe_data = create_test_exe_with_context_data();
+        std::fs::write(&exe_path, exe_data).unwrap();
+
+        let options = FluxOptions {
+            level: FluxCompressionLevel::Maximum,
+            password: std::ptr::null(),
+            thread_count: 0,
+            block_size: 0,
+            volume_size: 0,
+        };
+
+        let temp_dest1 = tempdir().unwrap();
+        let archive_path1 = temp_dest1.path().join("archive1.flx");
+        let mut compressor1 = FluxCompressor::new(options);
+        compressor1.compress_directory(src_path, &archive_path1).unwrap();
+        let bytes1 = std::fs::read(&archive_path1).unwrap();
+
+        let temp_dest2 = tempdir().unwrap();
+        let archive_path2 = temp_dest2.path().join("archive2.flx");
+        let mut compressor2 = FluxCompressor::new(options);
+        compressor2.compress_directory(src_path, &archive_path2).unwrap();
+        let bytes2 = std::fs::read(&archive_path2).unwrap();
+
+        assert_eq!(bytes1, bytes2, "Compression with context coding off must be deterministic");
+    }
+
+    #[test]
+    fn test_parser_with_context_determinism() {
+        crate::compress::override_context_literals(Some(true));
+
+        let temp_src = tempdir().unwrap();
+        let src_path = temp_src.path();
+        
+        let exe_path = src_path.join("file1.exe");
+        let exe_data = create_test_exe_with_context_data();
+        std::fs::write(&exe_path, exe_data).unwrap();
+
+        let options = FluxOptions {
+            level: FluxCompressionLevel::Maximum,
+            password: std::ptr::null(),
+            thread_count: 0,
+            block_size: 0,
+            volume_size: 0,
+        };
+
+        let temp_dest1 = tempdir().unwrap();
+        let archive_path1 = temp_dest1.path().join("archive1.flx");
+        let mut compressor1 = FluxCompressor::new(options);
+        compressor1.compress_directory(src_path, &archive_path1).unwrap();
+        let bytes1 = std::fs::read(&archive_path1).unwrap();
+
+        let temp_dest2 = tempdir().unwrap();
+        let archive_path2 = temp_dest2.path().join("archive2.flx");
+        let mut compressor2 = FluxCompressor::new(options);
+        compressor2.compress_directory(src_path, &archive_path2).unwrap();
+        let bytes2 = std::fs::read(&archive_path2).unwrap();
+
+        crate::compress::override_context_literals(None);
+
+        assert_eq!(bytes1, bytes2, "Compression with context coding on must be deterministic");
     }
 }

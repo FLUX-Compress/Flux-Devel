@@ -37,6 +37,21 @@ pub fn gather_context_stats(
     }
 }
 
+fn merge_histograms_per_table(
+    histograms: &[Histogram],
+    context_map: &[u8],
+    num_tables: usize,
+) -> Vec<Histogram> {
+    let mut merged_tables = vec![[0u32; 256]; num_tables];
+    for (context_id, &table_idx) in context_map.iter().enumerate() {
+        let t = table_idx as usize;
+        if t < num_tables && context_id < histograms.len() {
+            merged_tables[t] = merge_histograms(&merged_tables[t], &histograms[context_id]);
+        }
+    }
+    merged_tables
+}
+
 /// Evaluates the coding cost (Shannon entropy) of a given clustering/mapping.
 pub fn evaluate_clustering_cost(
     histograms: &[Histogram],
@@ -47,15 +62,7 @@ pub fn evaluate_clustering_cost(
         return 0;
     }
 
-    let mut merged_tables = vec![[0u32; 256]; num_tables];
-
-    // Sum histograms by their mapped table index.
-    for (context_id, &table_idx) in context_map.iter().enumerate() {
-        let t = table_idx as usize;
-        if t < num_tables && context_id < histograms.len() {
-            merged_tables[t] = merge_histograms(&merged_tables[t], &histograms[context_id]);
-        }
-    }
+    let merged_tables = merge_histograms_per_table(histograms, context_map, num_tables);
 
     let mut total_cost = 0u64;
     for merged in &merged_tables {
@@ -63,6 +70,42 @@ pub fn evaluate_clustering_cost(
     }
 
     total_cost
+}
+
+/// Computes the average per-literal cost across all contexts under a given
+/// (mode, num_tables, context_map) clustering. Used by the optimal parser
+/// to price literals when context coding is in use for the block.
+///
+/// Returns: average cost per literal, in the same fixed-point bit units used
+/// by cluster_entropy_times_n (16.16 format).
+pub(crate) fn average_literal_cost(
+    histograms: &[Histogram],
+    context_map: &[u8],
+    num_tables: usize,
+) -> u64 {
+    if num_tables == 0 {
+        return 0;
+    }
+
+    let merged_tables = merge_histograms_per_table(histograms, context_map, num_tables);
+
+    let mut total_cost = 0u64;
+    for merged in &merged_tables {
+        total_cost = total_cost.saturating_add(cluster_entropy_times_n(merged));
+    }
+
+    let mut total_literals = 0u64;
+    for hist in histograms {
+        for &c in hist.iter() {
+            total_literals = total_literals.saturating_add(c as u64);
+        }
+    }
+
+    if total_literals == 0 || total_cost == 0 {
+        return 0;
+    }
+
+    total_cost / total_literals
 }
 
 /// Computes the bit cost of encoding all literals using a single legacy frequency table.
@@ -78,6 +121,7 @@ pub(crate) fn legacy_single_table_cost(
     let histograms = gather_context_stats(literals_with_context, ContextMode::None);
     cluster_entropy_times_n(&histograms[0])
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -230,5 +274,71 @@ mod tests {
         // Shannon entropy of uniform distribution over 256 symbols is exactly 8 bits per symbol.
         // In 16.16 fixed point: 256 symbols * 8 bits/symbol * 65536 = 134,217,728.
         assert_eq!(cost, 134_217_728);
+    }
+
+    #[test]
+    fn test_avg_cost_single_table_uniform() {
+        // 1 table, uniform histogram of 256 symbols.
+        let hist = [1u32; 256];
+        let histograms = vec![hist];
+        let context_map = vec![0u8];
+        let avg_cost = average_literal_cost(&histograms, &context_map, 1);
+        // Expected total cost: Shannon entropy = 256 * 8 * 65536 = 134,217,728
+        // Total literals: 256
+        // Average cost: 134,217,728 / 256 = 8 * 65536 = 524,288
+        assert_eq!(avg_cost, 524_288);
+    }
+
+    #[test]
+    fn test_avg_cost_two_tables_separated() {
+        // 2 tables with different distributions:
+        // Context 0: heavy on 'A' (count 10)
+        // Context 1: heavy on 'B' (count 10)
+        let mut h0 = [0u32; 256];
+        h0[b'A' as usize] = 10;
+        let mut h1 = [0u32; 256];
+        h1[b'B' as usize] = 10;
+
+        let histograms = vec![h0, h1];
+        
+        // Single table coding cost
+        let context_map_single = vec![0, 0];
+        let cost_single = average_literal_cost(&histograms, &context_map_single, 1);
+
+        // Two table coding cost
+        let context_map_two = vec![0, 1];
+        let cost_two = average_literal_cost(&histograms, &context_map_two, 2);
+
+        // Average cost with 2 tables (separated) is 0 because each table has 0 entropy.
+        assert_eq!(cost_two, 0);
+        // Single table has mixed distribution ('A' and 'B'), so average cost > 0.
+        assert!(cost_single > 0);
+    }
+
+    #[test]
+    fn test_avg_cost_determinism() {
+        let mut histograms = vec![[0u32; 256]; 64];
+        for (i, hist) in histograms.iter_mut().enumerate() {
+            hist[i % 4] = (i + 1) as u32;
+        }
+        let mut context_map = vec![0u8; 64];
+        for (i, val) in context_map.iter_mut().enumerate() {
+            *val = (i % 3) as u8;
+        }
+
+        let cost1 = average_literal_cost(&histograms, &context_map, 3);
+        let cost2 = average_literal_cost(&histograms, &context_map, 3);
+        let cost3 = average_literal_cost(&histograms, &context_map, 3);
+
+        assert_eq!(cost1, cost2);
+        assert_eq!(cost2, cost3);
+    }
+
+    #[test]
+    fn test_avg_cost_zero_literals() {
+        let histograms = vec![[0u32; 256]; 4];
+        let context_map = vec![0, 0, 1, 1];
+        let avg_cost = average_literal_cost(&histograms, &context_map, 2);
+        assert_eq!(avg_cost, 0);
     }
 }
