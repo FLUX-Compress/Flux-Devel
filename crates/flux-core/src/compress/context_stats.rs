@@ -170,12 +170,12 @@ mod tests {
     #[test]
     fn test_evaluate_determinism() {
         let mut histograms = vec![[0u32; 256]; 64];
-        for i in 0..64 {
-            histograms[i][i % 4] = (i + 1) as u32;
+        for (i, hist) in histograms.iter_mut().enumerate() {
+            hist[i % 4] = (i + 1) as u32;
         }
         let mut context_map = vec![0u8; 64];
-        for i in 0..64 {
-            context_map[i] = (i % 3) as u8;
+        for (i, val) in context_map.iter_mut().enumerate() {
+            *val = (i % 3) as u8;
         }
 
         let cost1 = evaluate_clustering_cost(&histograms, &context_map, 3);
