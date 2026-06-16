@@ -54,3 +54,4 @@ pub mod ppm;
 pub mod rans;
 pub mod secondary;
 pub mod context;
+pub mod clustering;
