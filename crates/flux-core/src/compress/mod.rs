@@ -55,3 +55,4 @@ pub mod rans;
 pub mod secondary;
 pub mod context;
 pub mod clustering;
+pub mod context_stats;

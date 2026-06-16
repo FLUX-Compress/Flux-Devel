@@ -28,7 +28,7 @@ fn log2_fixed(x: u32) -> u64 {
 /// Returns the "weighted entropy" of a histogram:
 /// Σ for nonzero counts c: c * log2(N / c)
 /// computed deterministically using 16.16 fixed-point math.
-fn cluster_entropy_times_n(hist: &Histogram) -> u64 {
+pub(crate) fn cluster_entropy_times_n(hist: &Histogram) -> u64 {
     let mut sum_c = 0u64;
     let mut sum_c_log_c = 0u64;
     for &c in hist.iter() {
@@ -47,7 +47,7 @@ fn cluster_entropy_times_n(hist: &Histogram) -> u64 {
 }
 
 /// Returns the elementwise sum of two histograms (no normalization).
-fn merge_histograms(a: &Histogram, b: &Histogram) -> Histogram {
+pub(crate) fn merge_histograms(a: &Histogram, b: &Histogram) -> Histogram {
     let mut merged = [0u32; 256];
     for i in 0..256 {
         merged[i] = a[i].saturating_add(b[i]);
